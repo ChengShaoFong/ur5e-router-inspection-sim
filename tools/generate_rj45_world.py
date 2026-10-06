@@ -11,7 +11,6 @@ CABLE_SEGMENTS = 18
 SEGMENT_LENGTH = 0.02
 CABLE_RADIUS = 0.0045
 
-
 def cable_joint(index, indent=4):
     if index >= CABLE_SEGMENTS:
         return ""
