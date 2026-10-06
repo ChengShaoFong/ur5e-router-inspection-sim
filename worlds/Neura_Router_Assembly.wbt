@@ -1,0 +1,305 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/universal_robots/protos/UR5e.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/devices/robotiq/protos/Robotiq2f140Gripper.proto"
+
+WorldInfo {
+  basicTimeStep 16
+  contactProperties [
+    ContactProperties {
+      material1 "ROBOTIQ gripper pad"
+      material2 "default"
+      coulombFriction 2.5
+    }
+  ]
+}
+
+Viewpoint {
+  orientation -0.12425791215022519 -0.0817028859485302 0.988880483018928 4.294645700164866
+  position 1.0320523148329834 2.7973842359929217 0.9335186677979945
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 2 2
+}
+UR5e {
+  controller "router_horizontal_runner"
+  supervisor TRUE
+  toolSlot [
+    Camera {
+      translation 0.08 0.08 0.04
+      rotation 0 -0.8402672474838082 -0.5421724382574096 2
+      name "wrist_camera"
+      fieldOfView 1
+      width 640
+      height 480
+    }
+    Robotiq2f140Gripper {
+    }
+  ]
+}
+DEF ROUTER_SLOT Solid {
+  translation 0.45 -0.1 0
+  children [
+    Pose {
+      translation 0 0 0.01
+      children [
+        Shape {
+          appearance DEF SlotApp PBRAppearance {
+            baseColor 0.2 0.22 0.25
+            roughness 0.5
+          }
+          geometry Box {
+            size 0.1 0.1 0.02
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0.035 0 0.04
+      children [
+        Shape {
+          appearance USE SlotApp
+          geometry Box {
+            size 0.02 0.1 0.04
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.035 0 0.04
+      children [
+        Shape {
+          appearance USE SlotApp
+          geometry Box {
+            size 0.02 0.1 0.04
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0.035 0.04
+      children [
+        Shape {
+          appearance USE SlotApp
+          geometry Box {
+            size 0.06 0.02 0.04
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 -0.035 0.04
+      children [
+        Shape {
+          appearance USE SlotApp
+          geometry Box {
+            size 0.06 0.02 0.04
+          }
+        }
+      ]
+    }
+  ]
+  name "router_slot"
+  boundingObject Group {
+    children [
+      Pose {
+        translation 0 0 0.01
+        children [
+          Shape {
+            geometry Box {
+              size 0.1 0.1 0.02
+            }
+          }
+        ]
+      }
+      Pose {
+        translation 0.035 0 0.04
+        children [
+          Shape {
+            geometry Box {
+              size 0.02 0.1 0.04
+            }
+          }
+        ]
+      }
+      Pose {
+        translation -0.035 0 0.04
+        children [
+          Shape {
+            geometry Box {
+              size 0.02 0.1 0.04
+            }
+          }
+        ]
+      }
+      Pose {
+        translation 0 0.035 0.04
+        children [
+          Shape {
+            geometry Box {
+              size 0.06 0.02 0.04
+            }
+          }
+        ]
+      }
+      Pose {
+        translation 0 -0.035 0.04
+        children [
+          Shape {
+            geometry Box {
+              size 0.06 0.02 0.04
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+DEF ROUTER_SLOT_HORIZONTAL Solid {
+  translation 0.65 0.25 0.30
+  rotation 0 1 0 -1.5708
+  name "router_slot_horizontal"
+  children [
+    Pose {
+      translation 0 0 0.01
+      children [
+        Shape {
+          appearance DEF HorizontalSlotApp PBRAppearance {
+            baseColor 0.12 0.38 0.34
+            roughness 0.45
+          }
+          geometry Box {
+            size 0.1 0.1 0.02
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0.035 0 0.05
+      children [
+        Shape {
+          appearance USE HorizontalSlotApp
+          geometry Box {
+            size 0.02 0.1 0.06
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.035 0 0.05
+      children [
+        Shape {
+          appearance USE HorizontalSlotApp
+          geometry Box {
+            size 0.02 0.1 0.06
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 0.035 0.05
+      children [
+        Shape {
+          appearance USE HorizontalSlotApp
+          geometry Box {
+            size 0.06 0.02 0.06
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0 -0.035 0.05
+      children [
+        Shape {
+          appearance USE HorizontalSlotApp
+          geometry Box {
+            size 0.06 0.02 0.06
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.15 0.035 0.01
+      children [
+        Shape {
+          appearance USE HorizontalSlotApp
+          geometry Box {
+            size 0.30 0.02 0.02
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.15 -0.035 0.01
+      children [
+        Shape {
+          appearance USE HorizontalSlotApp
+          geometry Box {
+            size 0.30 0.02 0.02
+          }
+        }
+      ]
+    }
+  ]
+  boundingObject Group {
+    children [
+      Pose {
+        translation 0 0 0.01
+        children [Shape { geometry Box { size 0.1 0.1 0.02 } }]
+      }
+      Pose {
+        translation 0.035 0 0.05
+        children [Shape { geometry Box { size 0.02 0.1 0.06 } }]
+      }
+      Pose {
+        translation -0.035 0 0.05
+        children [Shape { geometry Box { size 0.02 0.1 0.06 } }]
+      }
+      Pose {
+        translation 0 0.035 0.05
+        children [Shape { geometry Box { size 0.06 0.02 0.06 } }]
+      }
+      Pose {
+        translation 0 -0.035 0.05
+        children [Shape { geometry Box { size 0.06 0.02 0.06 } }]
+      }
+      Pose {
+        translation -0.15 0.035 0.01
+        children [Shape { geometry Box { size 0.30 0.02 0.02 } }]
+      }
+      Pose {
+        translation -0.15 -0.035 0.01
+        children [Shape { geometry Box { size 0.30 0.02 0.02 } }]
+      }
+    ]
+  }
+}
+DEF COMPONENT_PLUG Solid {
+  translation 0.35 0.35 0.025
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.85 0.45 0.1
+        roughness 0.3
+      }
+      geometry Box {
+        size 0.04 0.04 0.05
+      }
+    }
+  ]
+  name "component_plug"
+  boundingObject Box {
+    size 0.04 0.04 0.05
+  }
+  physics Physics {
+    density -1
+    mass 0.04
+  }
+}
