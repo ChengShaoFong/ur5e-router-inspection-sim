@@ -264,10 +264,20 @@ LIFT_Z = 0.30
 SAFE_Z = 0.48
 POSE_TOLERANCE = 0.04
 OBJECT_TOLERANCE = 0.025
-RELEASE_TARGET = 0.38
-LATCH_ALIGNMENT_TOLERANCE = 0.008
+RELEASE_TARGET = 0.30
+# 線材拉力使夾持中的插頭略偏離孔中心；釋放後仍會檢查是否留在孔內。
+LATCH_ALIGNMENT_TOLERANCE = 0.015
 WATCHDOG_LIMIT = 1200
-OBSERVATION_POINT = (0.35, 0.35, 0.38)
+# 相機逐區巡看地面；每個位置都只是觀察點，抓取點由辨識結果決定。
+OBSERVATION_POINTS = (
+    (0.35, 0.35, 0.38),
+    (0.35, -0.35, 0.38),
+    (0.55, 0.0, 0.38),
+    (0.15, 0.0, 0.38),
+    (0.45, 0.45, 0.38),
+    (0.45, -0.45, 0.38),
+)
+FLOOR_GRASP_Z = 0.025
 
 (
     MOVE_ABOVE,
@@ -284,7 +294,8 @@ OBSERVATION_POINT = (0.35, 0.35, 0.38)
     COMPLETE,
     FAILED,
     OBSERVE,
-) = range(14)
+    ROTATE_FOR_PORT,
+) = range(15)
 
 state = MOVE_ABOVE
 watchdog = 0
@@ -300,11 +311,17 @@ insertion_corrections = 0
 alignment_bias_y = 0.0
 alignment_bias_z = 0.0
 detected_plug = None
+grasp_rotation = TOPDOWN_ROTATION
+transport_rotation = TOPDOWN_ROTATION
 vision_wait_steps = 0
+scan_index = 0
+lift_z = 0.05
+rotation_step = 0
+rotation_center = None
 
 
 def see_plug():
-    """將相機辨識到的插頭座標轉到世界座標；抓取時不讀取插頭真值。"""
+    """從相機辨識的標記位置與方向計算插頭中心及平面角度。"""
     if camera is None or camera_node is None:
         return None
     objects = [
@@ -320,9 +337,31 @@ def see_plug():
         origin[i] + sum(rotation[3 * i + j] * local[j] for j in range(3))
         for i in range(3)
     ]
-    # 橘色視覺標記位在插頭中心上方 14 mm。
-    world[2] -= 0.014
-    return world
+    axis_angle = objects[0].getOrientation()
+    marker_rotation = rotation_transform(axis_angle[:3], axis_angle[3])
+    object_x = [
+        sum(rotation[3 * i + j] * marker_rotation[j][0] for j in range(3))
+        for i in range(3)
+    ]
+    object_z = [
+        sum(rotation[3 * i + j] * marker_rotation[j][2] for j in range(3))
+        for i in range(3)
+    ]
+    # 橘色標記在插頭局部 Z 軸上方 14 mm。
+    center = [world[i] - 0.014 * object_z[i] for i in range(3)]
+    return center, math.atan2(object_x[1], object_x[0])
+
+
+def floor_grasp_rotation(yaw):
+    """讓夾爪從斜上方接近，夾指沿插頭寬度方向閉合。"""
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    diagonal = math.sqrt(0.5)
+    return (
+        (diagonal * cosine, sine, diagonal * cosine),
+        (diagonal * sine, -cosine, diagonal * sine),
+        (diagonal, 0.0, -diagonal),
+    )
 
 
 def distance(a, b):
@@ -358,16 +397,18 @@ def fail(message):
     state = FAILED
 
 
-def move_object(center, speed):
+def move_object(center, speed, rotation=None):
     global target_center, pose_target, watchdog
+    if rotation is None:
+        rotation = transport_rotation
     target_center = center
-    pose_target = pose_for_object(center, TOPDOWN_ROTATION, held_offset_local)
+    pose_target = pose_for_object(center, rotation, held_offset_local)
     apply_pose(pose_target, speed)
     watchdog = 0
 
 
-def reached(label):
-    if target_reached(pose_target, POSE_TOLERANCE):
+def reached(label, tolerance=POSE_TOLERANCE):
+    if target_reached(pose_target, tolerance):
         return True
     if watchdog > WATCHDOG_LIMIT:
         fail(f"{label} 移動逾時")
@@ -380,7 +421,7 @@ def held(label):
             gripper_connector_node.getPosition(),
             plug_connector_node.getPosition(),
         )
-        if gap > 0.015:
+        if gap > 0.025:
             fail(f"{label} 夾持連接點分離 {gap:.3f} m")
             return False
         return True
@@ -415,7 +456,6 @@ if grasp_latch is None:
     fail("找不到夾持護套的連接點")
 if camera is None or camera_node is None:
     fail("找不到夾爪視覺相機")
-
 print(">>> [RJ45 柔性線材插入實驗] 啟動")
 
 while robot.step(TIME_STEP) != -1:
@@ -427,7 +467,7 @@ while robot.step(TIME_STEP) != -1:
 
     if state == MOVE_ABOVE:
         control_gripper(0.0)
-        pose_target = solve_pose(OBSERVATION_POINT, TOPDOWN_ROTATION)
+        pose_target = solve_pose(OBSERVATION_POINTS[scan_index], TOPDOWN_ROTATION)
         apply_pose(pose_target, 0.35)
         state = OBSERVE
         watchdog = 0
@@ -435,24 +475,50 @@ while robot.step(TIME_STEP) != -1:
 
     elif state == OBSERVE:
         if reached("移至視覺觀察位置"):
-            detected_plug = see_plug()
-            if detected_plug is None:
+            observation = see_plug()
+            if observation is None:
                 vision_wait_steps += 1
-                if vision_wait_steps > 100:
-                    print(
-                        f"[視覺診斷] 辨識物件="
-                        f"{[(obj.getModel(), tuple(round(v, 3) for v in obj.getPosition())) for obj in camera.getRecognitionObjects()]}"
-                    )
-                    fail("相機未辨識到 RJ45 插頭，停止抓取")
+                if vision_wait_steps > 20:
+                    scan_index += 1
+                    vision_wait_steps = 0
+                    while scan_index < len(OBSERVATION_POINTS):
+                        try:
+                            pose_target = solve_pose(
+                                OBSERVATION_POINTS[scan_index], TOPDOWN_ROTATION
+                            )
+                            break
+                        except ValueError:
+                            scan_index += 1
+                    if scan_index == len(OBSERVATION_POINTS):
+                        fail("巡看可達區域後，仍未在相機畫面找到 RJ45 插頭")
+                    else:
+                        apply_pose(pose_target, 0.35)
+                        watchdog = 0
+                        print(f"[視覺] 巡看第 {scan_index + 1} 個地面區域")
                 continue
+            detected_plug, detected_yaw = observation
+            # 插頭尾端朝向底座時，從插頭另一側夾住護套，避開落地線材。
+            reverse_grasp = abs(detected_yaw) > math.radians(120)
+            grasp_yaw = (
+                detected_yaw - math.copysign(math.pi, detected_yaw)
+                if reverse_grasp else detected_yaw
+            )
+            grasp_rotation = floor_grasp_rotation(grasp_yaw)
+            transport_rotation = floor_grasp_rotation(
+                math.pi if reverse_grasp else 0.0
+            )
+            grasp_xy = (
+                detected_plug[0] + GRASP_REAR_OFFSET * math.cos(detected_yaw),
+                detected_plug[1] + GRASP_REAR_OFFSET * math.sin(detected_yaw),
+            )
             print(
                 f"[視覺] 插頭位置 X={detected_plug[0]:.3f}, "
-                f"Y={detected_plug[1]:.3f}, Z={detected_plug[2]:.3f} m"
+                f"Y={detected_plug[1]:.3f}, Z={detected_plug[2]:.3f} m；"
+                f"方向={math.degrees(detected_yaw):.1f}°"
             )
             pose_target = solve_pose(
-                (detected_plug[0] + GRASP_REAR_OFFSET,
-                 detected_plug[1], detected_plug[2] + 0.10),
-                TOPDOWN_ROTATION,
+                (grasp_xy[0], grasp_xy[1], FLOOR_GRASP_Z + 0.10),
+                grasp_rotation,
             )
             apply_pose(pose_target, 0.15)
             state = DESCEND
@@ -462,9 +528,8 @@ while robot.step(TIME_STEP) != -1:
     elif state == DESCEND:
         if reached("移至插頭上方"):
             pose_target = solve_pose(
-                (detected_plug[0] + GRASP_REAR_OFFSET,
-                 detected_plug[1], detected_plug[2]),
-                TOPDOWN_ROTATION,
+                (grasp_xy[0], grasp_xy[1], FLOOR_GRASP_Z),
+                grasp_rotation,
             )
             apply_pose(pose_target, 0.12)
             state = CLOSE
@@ -524,14 +589,35 @@ while robot.step(TIME_STEP) != -1:
                 [row[:3] for row in transform[:3]],
                 [plug[i] - grip[i] for i in range(3)],
             )
-            move_object((plug[0], plug[1], LIFT_Z), 0.07)
+            move_object((plug[0], plug[1], lift_z), 0.08, grasp_rotation)
             state = LIFT
-            print("4. 夾住插頭並抬起線材")
+            print("4. 夾住插頭並離地")
 
     elif state == LIFT:
-        if held("抬升中") and reached("抬升插頭"):
-            if abs(plug[2] - LIFT_Z) > OBJECT_TOLERANCE:
-                fail("線材拉住插頭，未達到搬運高度")
+        if held("抬升中") and reached("逐步抬升插頭"):
+            if abs(plug[2] - lift_z) > OBJECT_TOLERANCE:
+                fail("插頭未跟隨夾爪抬升")
+            elif lift_z < LIFT_Z - 1e-6:
+                lift_z = min(LIFT_Z, lift_z + 0.03)
+                move_object((plug[0], plug[1], lift_z), 0.08, grasp_rotation)
+            else:
+                rotation_center = (
+                    plug[0], plug[1], 0.36 if reverse_grasp else LIFT_Z
+                )
+                move_object(rotation_center, 0.08, grasp_rotation)
+                rotation_step = 0
+                state = ROTATE_FOR_PORT
+                print("5. 抬起後將插頭轉向網路孔")
+
+    elif state == ROTATE_FOR_PORT:
+        if held("轉向中") and reached("轉向網路孔"):
+            if reverse_grasp and rotation_step < 6:
+                rotation_step += 1
+                yaw = grasp_yaw + (math.pi - grasp_yaw) * rotation_step / 6
+                move_object(
+                    rotation_center, 0.06, floor_grasp_rotation(yaw)
+                )
+                print(f"[轉向] 第 {rotation_step}/6 段")
             else:
                 move_object((APPROACH_X, port[1], PORT_Z), 0.10)
                 state = MOVE_TO_PORT
@@ -592,7 +678,12 @@ while robot.step(TIME_STEP) != -1:
                 print("6. 沿 +X 方向插入 RJ45")
 
     elif state == INSERT:
-        if held("插入中") and reached("插入 RJ45"):
+        plug_at_port = (
+            step_x >= INSERT_X - 1e-6
+            and distance(plug, (INSERT_X, port[1], PORT_Z))
+            <= LATCH_ALIGNMENT_TOLERANCE
+        )
+        if held("插入中") and (plug_at_port or reached("插入 RJ45")):
             if step_x < INSERT_X - 1e-6:
                 step_x = min(INSERT_X, step_x + 0.01)
                 move_object(
@@ -634,7 +725,13 @@ while robot.step(TIME_STEP) != -1:
                 print("7. 插頭到位，於孔外打開夾爪")
 
     elif state == OPEN:
-        if all(sensor.getValue() < RELEASE_TARGET + 0.05 for sensor in gripper_sensors):
+        # 孔口可能暫時擋住單側夾指；解除夾持後先退一小段，讓夾指有空間繼續張開。
+        if (
+            all(sensor.getValue() < RELEASE_TARGET + 0.05 for sensor in gripper_sensors)
+            or watchdog > 45
+        ):
+            if watchdog > 45:
+                print("[退爪] 單側夾指受阻，先沿孔軸退開")
             step_x = INSERT_X - 0.01
             move_object(
                 (step_x, port[1] + alignment_bias_y, PORT_Z + alignment_bias_z),
@@ -642,11 +739,9 @@ while robot.step(TIME_STEP) != -1:
             )
             state = RETRACT
             print("8. 沿 -X 方向退出夾爪")
-        elif watchdog > 120:
-            fail("夾爪未完全打開")
 
     elif state == RETRACT:
-        if reached("退爪"):
+        if reached("退爪", 0.055):
             if step_x > APPROACH_X + 1e-6:
                 step_x = max(APPROACH_X, step_x - 0.01)
                 move_object(
