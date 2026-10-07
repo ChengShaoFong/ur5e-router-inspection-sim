@@ -1,0 +1,422 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/universal_robots/protos/UR5e.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/devices/robotiq/protos/Robotiq2f140Gripper.proto"
+
+WorldInfo {
+  basicTimeStep 32
+  contactProperties [
+    ContactProperties {
+      material1 "adapter_shell"
+      material2 "default"
+      coulombFriction 1.2
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.18092550664724 -0.11354553911495596 0.9769203506896217 4.24158121722658
+  position 1.367799983051082 2.277712752807023 1.2645067562030725
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 3 3
+}
+DEF ARM_1 UR5e {
+  translation 0 0.35 0
+  name "arm_1_gripper"
+  controller "dual_arm_router_task"
+  controllerArgs [
+    "arm1"
+  ]
+  supervisor TRUE
+  selfCollision FALSE
+  toolSlot [
+    Solid {
+      name "gripper connector mount"
+      children [
+        Robotiq2f140Gripper {}
+        DEF ARM1_GRASP Connector {
+          translation 0 0 0.20
+          rotation 0 1 0 -1.5707963
+          name "gripper_grasp_latch"
+          model "temporary_adapter_grasp"
+          type "active"
+          autoLock TRUE
+          distanceTolerance 0.03
+          axisTolerance 1.0
+          numberOfRotations 0
+          snap FALSE
+        }
+      ]
+      boundingObject Sphere { radius 0.008 }
+      physics Physics { density -1 mass 0.005 }
+    }
+  ]
+}
+DEF ARM_2 UR5e {
+  translation 0 -0.35 0
+  name "arm_2_cleaner"
+  controller "dual_arm_router_task"
+  controllerArgs [
+    "arm2"
+  ]
+  selfCollision FALSE
+  toolSlot [
+    DEF CLEANING_HEAD Solid {
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.18 0.22 0.26
+            roughness 0.4
+            metalness 0.5
+          }
+          geometry Box {
+            size 0.045 0.045 0.05
+          }
+        }
+        Pose {
+          translation 0 0 0.108
+          children [
+            Shape {
+              appearance PBRAppearance {
+                baseColor 0.1 0.72 0.82
+                roughness 0.4
+              }
+              geometry Box {
+                size 0.012 0.012 0.16
+              }
+            }
+          ]
+        }
+        Pose {
+          translation 0 0 0.194
+          children [
+            Shape {
+              appearance PBRAppearance {
+                baseColor 0.97 0.74 0.22
+                roughness 0.9
+              }
+              geometry Box {
+                size 0.016 0.016 0.015
+              }
+            }
+          ]
+        }
+      ]
+      name "long cleaning head"
+      boundingObject Group {
+        children [
+          Box { size 0.045 0.045 0.050 }
+          Pose { translation 0 0 0.108 children [ Box { size 0.012 0.012 0.160 } ] }
+        ]
+      }
+      physics Physics { density -1 mass 0.08 }
+    }
+  ]
+}
+DEF ROUTER Robot {
+  translation 0.77 0 0.28
+  controller "router_port_latch"
+  children [
+    DEF PORT_A_LATCH Connector {
+      translation -0.095 0.08 0.02
+      rotation 0 0 1 3.14159265
+      name "port_a_latch"
+      model "router_adapter_port"
+      type "active"
+      autoLock TRUE
+      distanceTolerance 0.012
+      axisTolerance 0.5
+      numberOfRotations 0
+      snap FALSE
+    }
+    Shape {
+      appearance DEF RouterCase PBRAppearance {
+        baseColor 0.09 0.12 0.16
+        roughness 0.55
+      }
+      geometry Box {
+        size 0.2 0.34 0.18
+      }
+    }
+    DEF PORT_A Pose {
+      translation -0.105 0.08 0.02
+      children [
+        Shape {
+          appearance DEF PortCavity PBRAppearance {
+            baseColor 0.015 0.025 0.035
+            roughness 0.9
+          }
+          geometry Box {
+            size 0.008 0.055 0.035
+          }
+        }
+        Pose {
+          translation -0.004 0 0.025
+          children [
+            Shape {
+              appearance DEF PortRim PBRAppearance {
+                baseColor 0.65 0.7 0.72
+                roughness 0.35
+                metalness 0.55
+              }
+              geometry Box {
+                size 0.01 0.066 0.009
+              }
+            }
+          ]
+        }
+        Pose {
+          translation -0.004 0 -0.025
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.066 0.009
+              }
+            }
+          ]
+        }
+        Pose {
+          translation -0.004 0.03 0
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.009 0.05
+              }
+            }
+          ]
+        }
+        Pose {
+          translation -0.004 -0.03 0
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.009 0.05
+              }
+            }
+          ]
+        }
+      ]
+    }
+    DEF PORT_B Pose {
+      translation -0.105 -0.08 0.02
+      children [
+        Shape {
+          appearance USE PortCavity
+          geometry Box {
+            size 0.008 0.055 0.035
+          }
+        }
+        Pose {
+          translation -0.004 0 0.025
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.066 0.009
+              }
+            }
+          ]
+        }
+        Pose {
+          translation -0.004 0 -0.025
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.066 0.009
+              }
+            }
+          ]
+        }
+        Pose {
+          translation -0.004 0.03 0
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.009 0.05
+              }
+            }
+          ]
+        }
+        Pose {
+          translation -0.004 -0.03 0
+          children [
+            Shape {
+              appearance USE PortRim
+              geometry Box {
+                size 0.01 0.009 0.05
+              }
+            }
+          ]
+        }
+      ]
+    }
+    Pose {
+      translation 0 0 0.092
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.12 0.2 0.27
+            roughness 0.6
+          }
+          geometry Box {
+            size 0.16 0.26 0.006
+          }
+        }
+      ]
+    }
+  ]
+  name "two-port router"
+  boundingObject Pose {
+    translation 0.025 0 0
+    children [ Box { size 0.15 0.34 0.18 } ]
+  }
+}
+DEF SERVICE_ADAPTER Solid {
+  translation 0.34 0.33 0.03
+  contactMaterial "adapter_shell"
+  children [
+    DEF ADAPTER_GRASP Connector {
+      translation 0 0 0.026
+      rotation 0 1 0 -1.5707963
+      name "adapter_grasp_point"
+      model "temporary_adapter_grasp"
+      type "passive"
+    }
+    DEF ADAPTER_PORT Connector {
+      translation 0.075 0 0
+      name "adapter_male_latch"
+      model "router_adapter_port"
+      type "passive"
+    }
+    Pose {
+      translation -0.01 0 0.018
+      children [
+        Shape {
+          appearance DEF AdapterCase PBRAppearance {
+            baseColor 0.9 0.48 0.1
+            roughness 0.55
+          }
+          geometry Box {
+            size 0.082 0.05 0.007
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.01 0 -0.018
+      children [
+        Shape {
+          appearance USE AdapterCase
+          geometry Box {
+            size 0.082 0.05 0.007
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.01 0.021 0
+      children [
+        Shape {
+          appearance USE AdapterCase
+          geometry Box {
+            size 0.082 0.008 0.038
+          }
+        }
+      ]
+    }
+    Pose {
+      translation -0.01 -0.021 0
+      children [
+        Shape {
+          appearance USE AdapterCase
+          geometry Box {
+            size 0.082 0.008 0.038
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0.031 0 0
+      children [
+        Shape {
+          appearance USE AdapterCase
+          geometry Box {
+            size 0.008 0.05 0.038
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0.054 0 0
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.73 0.78 0.82
+            roughness 0.35
+            metalness 0.35
+          }
+          geometry Box {
+            size 0.042 0.022 0.016
+          }
+        }
+      ]
+    }
+    Pose {
+      translation 0.071 0 0.009
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.91 0.73 0.2
+            roughness 0.3
+            metalness 0.75
+          }
+          geometry Box {
+            size 0.006 0.019 0.003
+          }
+        }
+      ]
+    }
+  ]
+  name "hollow Ethernet service adapter"
+  boundingObject Group {
+    children [
+      Pose { translation -0.010 0 0.018 children [ Box { size 0.082 0.050 0.007 } ] }
+      Pose { translation -0.010 0 -0.018 children [ Box { size 0.082 0.050 0.007 } ] }
+      Pose { translation -0.010 0.021 0 children [ Box { size 0.082 0.008 0.038 } ] }
+      Pose { translation -0.010 -0.021 0 children [ Box { size 0.082 0.008 0.038 } ] }
+      Pose { translation 0.031 0 0 children [ Box { size 0.008 0.050 0.038 } ] }
+      Pose { translation 0.054 0 0 children [ Box { size 0.042 0.022 0.016 } ] }
+    ]
+  }
+  physics Physics {
+    density -1
+    mass 0.10
+    damping Damping { linear 0.1 angular 0.2 }
+  }
+}
+Pose {
+  translation 0.34 0.33 0.002
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.1 0.45 0.2
+        roughness 0.9
+      }
+      geometry Box {
+        size 0.14 0.1 0.003
+      }
+    }
+  ]
+}
