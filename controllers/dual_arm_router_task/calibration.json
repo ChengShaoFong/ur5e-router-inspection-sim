@@ -1,7 +1,7 @@
 {
-  "pickup_tip": [0.34, 0.33, 0.014],
+  "pickup_tip": [0.34, 0.33, 0.034],
   "installed_tip": [0.589, 0.08, 0.297],
   "insertion_tip": [0.600, 0.08, 0.300],
   "place_tip": [0.34, 0.33, 0.022],
-  "closed_angle": 0.55
+  "closed_angle": 0.7
 }

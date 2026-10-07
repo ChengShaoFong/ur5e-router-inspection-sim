@@ -18,7 +18,7 @@ PICKUP_TIP = tuple(CALIBRATION["pickup_tip"])
 INSTALLED_TIP = tuple(CALIBRATION["installed_tip"])
 INSERTION_TIP = tuple(CALIBRATION["insertion_tip"])
 PLACE_TIP = tuple(CALIBRATION["place_tip"])
-CLOSED_ANGLE = float(CALIBRATION["closed_angle"])
+CLOSED_ANGLE = max(0.0, min(float(CALIBRATION["closed_angle"]), 0.7))
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ ARM1 = (
     Cue(6, "lower fingers around adapter", PICKUP_TIP, TOP_DOWN),
     Cue(7, "close gripper on adapter", grip=CLOSED_ANGLE),
     Cue(10, "hold while fingers close", PICKUP_TIP, TOP_DOWN),
-    Cue(12, "lift adapter", (PICKUP_TIP[0], PICKUP_TIP[1], PICKUP_TIP[2] + 0.248), TOP_DOWN),
+    Cue(13, "lift adapter", (PICKUP_TIP[0], PICKUP_TIP[1], PICKUP_TIP[2] + 0.248), TOP_DOWN),
     Cue(15, "carry to router", (0.43, 0.08, 0.40), TOP_DOWN),
     Cue(18, "align with port A", (0.515, 0.08, 0.300), TOP_DOWN),
     Cue(22, "insert adapter in port A", INSERTION_TIP, TOP_DOWN),

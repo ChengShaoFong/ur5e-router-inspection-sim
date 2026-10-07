@@ -9,7 +9,7 @@ from pathlib import Path
 from controller import Supervisor
 
 from kinematics import JOINT_NAMES, TIP_OFFSET, forward_kinematics
-from plan import ARM1, ARM2, ARM_BASES, INSERTION_TIP, INSTALLED_TIP, PLACE_TIP, joint_trajectory
+from plan import ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP, PLACE_TIP, joint_trajectory
 
 
 TIME_STEP = 32
@@ -77,6 +77,11 @@ def main():
                 for motor in gripper:
                     motor.setVelocity(0.5 if cue.grip > 0 else 0.8)
                     motor.setPosition(cue.grip)
+                if gripper_sensors:
+                    print(
+                        f"[router service {role}] gripper command={cue.grip:.3f} rad; "
+                        f"actual fingers={tuple(round(sensor.getValue(), 3) for sensor in gripper_sensors)} rad"
+                    )
             print(f"[router service {role}] {second:5.1f}s: {cue.label}")
             if trace:
                 line = f"{second:.2f} {cue.label}"
@@ -85,16 +90,22 @@ def main():
                 trace.write(line + "\n")
             next_cue += 1
             if cue.label.startswith("hold while fingers close"):
+                finger_angles = tuple(sensor.getValue() for sensor in gripper_sensors)
                 settled = len(grip_history) == grip_history.maxlen and all(
                     max(values) - min(values) < 0.015
                     for values in zip(*grip_history)
                 )
                 moved = sum((a - b) ** 2 for a, b in zip(adapter.getPosition(), grasp_start_position)) ** 0.5
-                if not settled or moved > 0.012:
+                physical_contact = all(0.05 < angle < CLOSED_ANGLE - 0.03 for angle in finger_angles)
+                print(
+                    f"[router service {role}] actual fingers={tuple(round(v, 3) for v in finger_angles)} rad; "
+                    f"target={CLOSED_ANGLE:.3f}; contact inferred={physical_contact}"
+                )
+                if not settled or not physical_contact or moved > 0.012:
                     stage_failed = True
                     abort_target = tuple(sensor.getValue() for sensor in sensors)
                     next_cue = len(cues)
-                    print(f"[router service {role}] grasp FAILED: fingers settled={settled}, adapter moved={moved:.3f} m during closing; adjust pickup height, x/y or closed_angle")
+                    print(f"[router service {role}] grasp FAILED: fingers settled={settled}, contact inferred={physical_contact}, adapter moved={moved:.3f} m; inspect x/y/z and contact geometry")
                     break
                 print(f"[router service {role}] fingers settled; adapter moved {moved:.3f} m during closing")
             if role == "arm1" and cue.label == "align with port A" and not stage_failed:
