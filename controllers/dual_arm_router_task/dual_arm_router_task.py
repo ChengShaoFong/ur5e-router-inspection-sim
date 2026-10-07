@@ -1,246 +1,357 @@
-"""Two UR5e actors for friction gripping and cleaning-head insertion."""
+"""雙手臂 Webots 控制器：依時間表觀測、處理事件並下達關節目標。"""
 
 import os
 import sys
-import math
 from collections import deque
 from dataclasses import replace
 from pathlib import Path
-from statistics import median
 
 from controller import Supervisor
 
+import adapter_vision_config as adapter_config
+import control_config as controls
+from adapter_vision_tracker import AdapterVisionTracker
 from kinematics import JOINT_NAMES, TIP_OFFSET, forward_kinematics
-from plan import ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP, PLACE_TIP, PORT, joint_trajectory
-from port_vision import AOI, CAMERA_HEIGHT, CAMERA_WIDTH, locate_port
+from plan import (
+    ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP,
+    PLACE_TIP, PORT, CueEvent, joint_trajectory,
+)
+from vision_tracker import PortVisionTracker
+from vision_config import SETTLE_SECONDS
 
-TIME_STEP = 32
-MAX_JOINT_SPEED = 2.5
+
+GRIPPER_MOTORS = (
+    "ROBOTIQ 2F-140 Gripper::left finger joint",
+    "ROBOTIQ 2F-140 Gripper::right finger joint",
+)
+GRIPPER_SENSORS = (
+    "ROBOTIQ 2F-140 Gripper left finger joint sensor",
+    "ROBOTIQ 2F-140 Gripper right finger joint sensor",
+)
 
 
-def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("arm1", "arm2"):
-        raise RuntimeError("Set controllerArgs to [ \"arm1\" ] or [ \"arm2\" ]")
-    role = sys.argv[1]
-    robot = Supervisor()
-    cues = ARM1 if role == "arm1" else ARM2
-    trajectory = joint_trajectory(role, cues)
-    cue_times = {cue.label: cue.second for cue in cues}
-    pickup_check_time = cue_times.get("lift adapter", float("inf")) + 1
-    removal_check_time = cue_times.get("remove adapter from router", float("inf")) + 1
-    installation_check_time = ARM2[1].second
-    completion_time = max(ARM1[-1].second, ARM2[-1].second) + 2
-    trace_dir = os.environ.get("DUAL_ARM_TRACE_DIR")
-    trace = open(Path(trace_dir) / f"{role}.log", "w", encoding="utf-8", buffering=1) if trace_dir else None
-    motors = [robot.getDevice(name) for name in JOINT_NAMES]
-    sensors = [robot.getDevice(f"{name}_sensor") for name in JOINT_NAMES]
-    for sensor in sensors:
-        sensor.enable(TIME_STEP)
-    for motor in motors:
-        motor.setVelocity(MAX_JOINT_SPEED)
-    if role == "arm1":
-        # Initialize the gripper above the floor before physics advances.
-        for motor, angle in zip(motors, trajectory[0][1]):
-            joint = robot.getFromDevice(motor._tag).getParentNode()
-            joint.setJointPosition(angle)
+def event_time(cues, event):
+    """取得指定流程事件的秒數；沒有該事件時回傳無限大。"""
+    return next((cue.second for cue in cues if cue.event == event), float("inf"))
 
-    gripper = ()
-    gripper_sensors = ()
-    adapter = robot.getFromDef("SERVICE_ADAPTER")
-    if adapter is None:
-        raise RuntimeError("SERVICE_ADAPTER is missing from the world")
-    if role == "arm1":
-        camera = robot.getDevice("port_a_camera")
-        camera.enable(128)
-        camera_node = robot.getFromDevice(camera._tag)
-        router_node = robot.getFromDef("ROUTER")
-        display = robot.getDevice("port_a_vision_display")
-        display.attachCamera(camera)
-        display.setColor(0x00FF00)
-        display.drawRectangle(AOI[0], AOI[1], AOI[2] - AOI[0], AOI[3] - AOI[1])
-        gripper = tuple(robot.getDevice(name) for name in (
-            "ROBOTIQ 2F-140 Gripper::left finger joint",
-            "ROBOTIQ 2F-140 Gripper::right finger joint",
-        ))
-        gripper_sensors = tuple(robot.getDevice(name) for name in (
-            "ROBOTIQ 2F-140 Gripper left finger joint sensor",
-            "ROBOTIQ 2F-140 Gripper right finger joint sensor",
-        ))
-        for sensor in gripper_sensors:
-            sensor.enable(TIME_STEP)
 
-    next_cue = 0
-    next_point = 0
-    reported_finish = False
-    reported_pickup = False
-    reported_removal = False
-    checked_installation = False
-    stage_failed = False
-    abort_target = None
-    grip_history = deque(maxlen=20)
-    grasp_start_position = None
-    latest_port_vision = None
-    vision_history = deque(maxlen=5)
-    last_vision_time = -1.0
-    while robot.step(TIME_STEP) != -1:
-        second = robot.getTime()
-        if role == "arm1" and 18.5 <= second <= 20.0 and second - last_vision_time >= 0.128:
-            last_vision_time = second
-            # Clear the previous overlay so old detection rectangles do not
-            # accumulate over the camera image.
-            display.setAlpha(0.0)
-            display.fillRectangle(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT)
-            display.setAlpha(1.0)
-            display.setColor(0x00FF00)
-            display.drawRectangle(AOI[0], AOI[1], AOI[2] - AOI[0], AOI[3] - AOI[1])
-            detection = locate_port(
-                camera.getImage(), camera_node.getPosition(), camera_node.getOrientation(),
-                router_node.getPosition()[0] - 0.114,
-            )
-            if detection is None:
-                vision_history.clear()
-            else:
-                world_y, world_z, bounding_box, confidence = detection
-                if (math.isfinite(world_y) and math.isfinite(world_z) and confidence >= 0.2
-                        and abs(world_y - PORT[1]) < 0.05 and abs(world_z - PORT[2]) < 0.05):
-                    vision_history.append((world_y, world_z))
-                    left, top, right, bottom = bounding_box
-                    display.setColor(0x00FFFF)
-                    display.drawRectangle(left, top, right - left, bottom - top)
-                    ys, zs = zip(*vision_history)
-                    if (len(vision_history) == vision_history.maxlen
-                            and max(ys) - min(ys) < 0.0025
-                            and max(zs) - min(zs) < 0.0025):
-                        latest_port_vision = {"time": second, "y": median(ys), "z": median(zs)}
-                else:
-                    vision_history.clear()
-        if gripper_sensors:
-            grip_history.append(tuple(sensor.getValue() for sensor in gripper_sensors))
-        while next_cue < len(cues) and second >= cues[next_cue].second:
-            cue = cues[next_cue]
+def measured_tool_tip(role, joints):
+    """由實際關節角計算夾爪工具點的世界座標。"""
+    frame = forward_kinematics(joints)
+    return tuple(
+        frame[row][3]
+        + sum(frame[row][axis] * TIP_OFFSET[axis] for axis in range(3))
+        + ARM_BASES[role][row]
+        for row in range(3)
+    )
+
+
+def corrected_insertion_tip(adapter_offset, port_y, port_z):
+    """結合視覺對位與實際夾持偏移，計算插入時的工具點。"""
+    return (
+        INSERTION_TIP[0] - adapter_offset[0],
+        INSERTION_TIP[1] + port_y - PORT[1] - adapter_offset[1],
+        INSERTION_TIP[2] + port_z - PORT[2] - adapter_offset[2],
+    )
+
+
+class DualArmTask:
+    """持有一支手臂的裝置與流程狀態；主循環只負責安排每步工作。"""
+
+    def __init__(self, robot, role):
+        """載入路徑、感測器，以及對應手臂的夾爪或相機追蹤器。"""
+        self.robot = robot
+        self.role = role
+        self.cues = ARM1 if role == "arm1" else ARM2
+        self.trajectory = joint_trajectory(role, self.cues)
+        self.pickup_check_time = event_time(self.cues, CueEvent.LIFT_ADAPTER) + controls.PICKUP_CHECK_DELAY
+        self.removal_check_time = event_time(self.cues, CueEvent.REMOVE_ADAPTER) + controls.REMOVAL_CHECK_DELAY
+        self.cleaner_insert_time = event_time(ARM2, CueEvent.INSERT_CLEANER)
+        self.completion_time = max(ARM1[-1].second, ARM2[-1].second) + controls.COMPLETION_DELAY
+
+        trace_path = os.environ.get("DUAL_ARM_TRACE_DIR")
+        self.capture_dir = (
+            Path(trace_path) if trace_path
+            else Path(__file__).resolve().parents[2] / ".dual-arm-runtime"
+        )
+        if trace_path:
+            self.capture_dir.mkdir(parents=True, exist_ok=True)
+        self.trace = (
+            open(self.capture_dir / f"{role}.log", "w", encoding="utf-8", buffering=1)
+            if trace_path else None
+        )
+
+        self.adapter = robot.getFromDef("SERVICE_ADAPTER")
+        if self.adapter is None:
+            raise RuntimeError("SERVICE_ADAPTER is missing from the world")
+        self.motors = tuple(robot.getDevice(name) for name in JOINT_NAMES)
+        self.sensors = tuple(robot.getDevice(f"{name}_sensor") for name in JOINT_NAMES)
+        for sensor in self.sensors:
+            sensor.enable(controls.TIME_STEP_MS)
+        for motor in self.motors:
+            motor.setVelocity(controls.MAX_JOINT_SPEED)
+
+        self.gripper = ()
+        self.gripper_sensors = ()
+        self.vision = None
+        self.adapter_vision = None
+        if role == "arm1":
+            self._set_initial_arm_pose()
+            self.gripper = tuple(robot.getDevice(name) for name in GRIPPER_MOTORS)
+            self.gripper_sensors = tuple(robot.getDevice(name) for name in GRIPPER_SENSORS)
+            for sensor in self.gripper_sensors:
+                sensor.enable(controls.TIME_STEP_MS)
+            capture_start = event_time(self.cues, CueEvent.STOP_IN_FRONT) + SETTLE_SECONDS
+            capture_end = event_time(self.cues, CueEvent.CAPTURE_PORT)
+            self.vision = PortVisionTracker(robot, capture_start, capture_end)
+        else:
+            capture_start = event_time(self.cues, CueEvent.ARM1_CLEAR_PORT) + adapter_config.SETTLE_SECONDS
+            self.adapter_vision = AdapterVisionTracker(robot, capture_start, self.cleaner_insert_time)
+
+        self.applied_adapter_pose = PORT
+        self.last_adapter_replan_time = float("-inf")
+
+        self.next_cue = 0
+        self.next_point = 0
+        self.failed = False
+        self.abort_target = None
+        self.grip_history = deque(maxlen=controls.GRIP_HISTORY_SAMPLES)
+        self.grasp_start_position = None
+        self.reported_pickup = False
+        self.reported_removal = False
+        self.reported_finish = False
+
+    def _set_initial_arm_pose(self):
+        """物理模擬開始前將夾爪抬離地板，底座位置不變。"""
+        for motor, angle in zip(self.motors, self.trajectory[0][1]):
+            robot_joint = self.robot.getFromDevice(motor._tag).getParentNode()
+            robot_joint.setJointPosition(angle)
+
+    def run(self):
+        """依序執行觀測、事件、狀態檢查、關節命令與完成回報。"""
+        try:
+            while self.robot.step(controls.TIME_STEP_MS) != -1:
+                second = self.robot.getTime()
+                if self.vision is not None:
+                    self.vision.sample(second)
+                if self.adapter_vision is not None:
+                    self.adapter_vision.sample(second)
+                    self._track_adapter(second)
+                if self.gripper_sensors:
+                    self.grip_history.append(self._finger_angles())
+                self._process_cues(second)
+                self._check_milestones(second)
+                self._command_joints(second)
+                self._report_completion(second)
+        finally:
+            if self.trace is not None:
+                self.trace.close()
+
+    def _process_cues(self, second):
+        """依時間處理夾爪命令與流程事件；顯示文字不參與判斷。"""
+        while self.next_cue < len(self.cues) and second >= self.cues[self.next_cue].second:
+            cue = self.cues[self.next_cue]
             if cue.grip is not None:
-                if cue.grip > 0:
-                    grasp_start_position = tuple(adapter.getPosition())
-                    grip_history.clear()
-                for motor in gripper:
-                    motor.setVelocity(0.5 if cue.grip > 0 else 0.8)
-                    motor.setPosition(cue.grip)
-                if gripper_sensors:
-                    print(
-                        f"[router service {role}] gripper command={cue.grip:.3f} rad; "
-                        f"actual fingers={tuple(round(sensor.getValue(), 3) for sensor in gripper_sensors)} rad"
-                    )
-            print(f"[router service {role}] {second:5.1f}s: {cue.label}")
-            if trace:
-                line = f"{second:.2f} {cue.label}"
-                if adapter is not None:
-                    line += f" adapter={tuple(round(x, 4) for x in adapter.getPosition())}"
-                trace.write(line + "\n")
-            next_cue += 1
-            if cue.label.startswith("hold while fingers close"):
-                finger_angles = tuple(sensor.getValue() for sensor in gripper_sensors)
-                settled = len(grip_history) == grip_history.maxlen and all(
-                    max(values) - min(values) < 0.015
-                    for values in zip(*grip_history)
-                )
-                moved = sum((a - b) ** 2 for a, b in zip(adapter.getPosition(), grasp_start_position)) ** 0.5
-                physical_contact = all(0.05 < angle < CLOSED_ANGLE - 0.03 for angle in finger_angles)
-                print(
-                    f"[router service {role}] actual fingers={tuple(round(v, 3) for v in finger_angles)} rad; "
-                    f"target={CLOSED_ANGLE:.3f}; contact inferred={physical_contact}"
-                )
-                if not settled or not physical_contact or moved > 0.012:
-                    stage_failed = True
-                    abort_target = tuple(sensor.getValue() for sensor in sensors)
-                    next_cue = len(cues)
-                    print(f"[router service {role}] grasp FAILED: fingers settled={settled}, contact inferred={physical_contact}, adapter moved={moved:.3f} m; inspect x/y/z and contact geometry")
-                    break
-                print(f"[router service {role}] fingers settled; adapter moved {moved:.3f} m during closing")
-            if role == "arm1" and cue.label == "capture and locate port A" and not stage_failed:
-                actual_joints = tuple(sensor.getValue() for sensor in sensors)
-                capture_dir = Path(trace_dir) if trace_dir else Path(__file__).resolve().parents[2] / ".dual-arm-runtime"
-                capture_dir.mkdir(parents=True, exist_ok=True)
-                camera.saveImage(str(capture_dir / "port_a_capture.png"), 100)
-                if latest_port_vision is None or second - latest_port_vision["time"] > 0.5:
-                    stage_failed = True
-                    abort_target = actual_joints
-                    next_cue = len(cues)
-                    print(f"[router service {role}] alignment FAILED: stopped hand camera did not localize port A")
-                    break
-                frame = forward_kinematics(actual_joints)
-                tip = tuple(
-                    frame[row][3]
-                    + sum(frame[row][axis] * TIP_OFFSET[axis] for axis in range(3))
-                    + ARM_BASES[role][row]
-                    for row in range(3)
-                )
-                offset = tuple(a - t for a, t in zip(adapter.getPosition(), tip))
-                if max(abs(value) for value in offset) > 0.035:
-                    stage_failed = True
-                    abort_target = actual_joints
-                    next_cue = len(cues)
-                    print(f"[router service {role}] alignment FAILED: adapter slipped {offset}; adjust physical grip before insertion")
-                    break
-                corrected_tip = (
-                    INSERTION_TIP[0] - offset[0],
-                    INSERTION_TIP[1] + float(latest_port_vision["y"]) - PORT[1] - offset[1],
-                    INSERTION_TIP[2] + float(latest_port_vision["z"]) - PORT[2] - offset[2],
-                )
-                cues = tuple(replace(item, tip=corrected_tip) if item.label == "insert adapter in port A" else item for item in cues)
-                trajectory = joint_trajectory(role, cues)
-                next_point = 0
-                print(f"[router service {role}] camera port y/z={(round(float(latest_port_vision['y']), 4), round(float(latest_port_vision['z']), 4))}; adapter offset={tuple(round(v, 4) for v in offset)}; corrected insertion tip={tuple(round(v, 4) for v in corrected_tip)}")
-        if role == "arm1" and not reported_pickup and second >= pickup_check_time:
-            reported_pickup = True
-            if not stage_failed and adapter.getPosition()[2] < 0.10:
-                stage_failed = True
-                abort_target = tuple(sensor.getValue() for sensor in sensors)
-                next_cue = len(cues)
-                print(f"[router service {role}] pickup FAILED: adapter did not rise with the fingers; calibrate pickup x/y/z and grip width")
-        if role == "arm2" and not checked_installation and second >= installation_check_time:
-            checked_installation = True
-            position = adapter.getPosition()
-            if position[0] < 0.55 or abs(position[1] - 0.08) > 0.04 or position[2] < 0.24:
-                stage_failed = True
-                abort_target = tuple(sensor.getValue() for sensor in sensors)
-                next_cue = len(cues)
-                print(f"[router service {role}] cleaning SKIPPED: adapter is not installed in port A")
-        if role == "arm1" and not reported_removal and second >= removal_check_time:
-            reported_removal = True
-            if not stage_failed and adapter.getPosition()[0] > INSTALLED_TIP[0] - 0.04:
-                stage_failed = True
-                abort_target = tuple(sensor.getValue() for sensor in sensors)
-                next_cue = len(cues)
-                print(f"[router service {role}] removal FAILED: adapter stayed near port A; calibrate installed pickup pose or grip width")
-        while next_point < len(trajectory) and second >= trajectory[next_point][0]:
-            next_point += 1
-        start_time, start_pose = trajectory[max(0, next_point - 1)]
-        if next_point < len(trajectory):
-            end_time, end_pose = trajectory[next_point]
+                self._command_gripper(cue.grip)
+            self._log_cue(second, cue.label)
+            self.next_cue += 1
+            if cue.event == CueEvent.CHECK_GRASP:
+                self._check_grasp()
+            elif cue.event == CueEvent.CAPTURE_PORT and not self.failed:
+                self._capture_and_align(second)
+            elif cue.event == CueEvent.INSERT_CLEANER and not self.failed:
+                self._verify_cleaner_alignment(second)
+            if self.failed:
+                break
+
+    def _command_gripper(self, angle):
+        """設定夾爪開合速度與角度，閉合時記錄物件起始位置。"""
+        if angle > 0:
+            self.grasp_start_position = tuple(self.adapter.getPosition())
+            self.grip_history.clear()
+        for motor in self.gripper:
+            motor.setVelocity(controls.GRIPPER_CLOSE_SPEED if angle > 0 else controls.GRIPPER_OPEN_SPEED)
+            motor.setPosition(angle)
+        if self.gripper_sensors:
+            self._print(
+                f"gripper command={angle:.3f} rad; "
+                f"actual fingers={tuple(round(x, 3) for x in self._finger_angles())} rad"
+            )
+
+    def _check_grasp(self):
+        """用手指停止變動、接觸角度與物件位移檢查抓取結果。"""
+        angles = self._finger_angles()
+        settled = len(self.grip_history) == self.grip_history.maxlen and all(
+            max(values) - min(values) < controls.MAX_FINGER_RANGE for values in zip(*self.grip_history)
+        )
+        moved = sum(
+            (a - b) ** 2 for a, b in zip(self.adapter.getPosition(), self.grasp_start_position)
+        ) ** 0.5
+        contact = all(
+            controls.MIN_CONTACT_ANGLE < angle < CLOSED_ANGLE - controls.CONTACT_ANGLE_MARGIN
+            for angle in angles
+        )
+        self._print(
+            f"actual fingers={tuple(round(x, 3) for x in angles)} rad; "
+            f"target={CLOSED_ANGLE:.3f}; contact inferred={contact}"
+        )
+        if not settled or not contact or moved > controls.MAX_GRASP_MOVEMENT:
+            self._fail(
+                f"grasp FAILED: fingers settled={settled}, contact inferred={contact}, "
+                f"adapter moved={moved:.3f} m; inspect x/y/z and contact geometry"
+            )
+            return
+        self._print(f"fingers settled; adapter moved {moved:.3f} m during closing")
+
+    def _capture_and_align(self, second):
+        """儲存原始影像，使用穩定定位結果重算插入路徑。"""
+        self.vision.save_capture(self.capture_dir)
+        port = self.vision.recent(second)
+        if port is None:
+            self._fail("alignment FAILED: stopped hand camera did not localize port A")
+            return
+
+        joints = self._joint_angles()
+        tip = measured_tool_tip(self.role, joints)
+        offset = tuple(a - t for a, t in zip(self.adapter.getPosition(), tip))
+        if max(abs(value) for value in offset) > controls.MAX_ADAPTER_OFFSET:
+            self._fail(f"alignment FAILED: adapter slipped {offset}; adjust physical grip before insertion")
+            return
+
+        target = corrected_insertion_tip(offset, port.y, port.z)
+        self.cues = tuple(
+            replace(cue, tip=target) if cue.event == CueEvent.INSERT_ADAPTER else cue
+            for cue in self.cues
+        )
+        self.trajectory = joint_trajectory(self.role, self.cues)
+        self.next_point = 0
+        self._print(
+            f"camera port y/z={(round(port.y, 4), round(port.z, 4))}; "
+            f"adapter offset={tuple(round(x, 4) for x in offset)}; "
+            f"corrected insertion tip={tuple(round(x, 4) for x in target)}"
+        )
+
+    def _track_adapter(self, second):
+        """依手臂二相機的最新插座座標，持續重算接近、插入與退出路徑。"""
+        if self.failed or second > self.cleaner_insert_time:
+            return
+        detection = self.adapter_vision.recent(second)
+        if detection is None:
+            return
+        observed = (detection.x, detection.y, detection.z)
+        movement = max(abs(a - b) for a, b in zip(observed, self.applied_adapter_pose))
+        if (movement < adapter_config.MIN_REPLAN_SHIFT
+                or second - self.last_adapter_replan_time < adapter_config.MIN_REPLAN_INTERVAL):
+            return
+        delta = tuple(a - b for a, b in zip(observed, PORT))
+        shifted_events = {
+            CueEvent.APPROACH_SOCKET, CueEvent.INSERT_CLEANER,
+            CueEvent.ROTATE_CLEANER, CueEvent.WITHDRAW_CLEANER,
+        }
+        updated = tuple(
+            replace(cue, tip=tuple(value + shift for value, shift in zip(cue.tip, delta)))
+            if cue.event in shifted_events else cue
+            for cue in ARM2
+        )
+        try:
+            trajectory = joint_trajectory(self.role, updated)
+        except ValueError:
+            self._fail(f"cleaning SKIPPED: camera target {observed} is outside reachable poses")
+            return
+        self.cues = updated
+        self.trajectory = trajectory
+        self.next_point = 0
+        self.applied_adapter_pose = observed
+        self.last_adapter_replan_time = second
+        self._print(f"adapter camera x/y/z={tuple(round(x, 4) for x in observed)}; cleaning path updated")
+
+    def _verify_cleaner_alignment(self, second):
+        """插入清潔頭前確認相機仍看得到近期插座位置。"""
+        self.adapter_vision.save_capture(self.capture_dir)
+        if self.adapter_vision.recent(second) is None:
+            self._fail("cleaning SKIPPED: arm 2 camera did not localize adapter socket")
+
+    def _check_milestones(self, second):
+        """在抬起、安裝與拔出後確認物件已到預期區域。"""
+        if self.role == "arm1" and not self.reported_pickup and second >= self.pickup_check_time:
+            self.reported_pickup = True
+            if not self.failed and self.adapter.getPosition()[2] < controls.PICKUP_MIN_HEIGHT:
+                self._fail("pickup FAILED: adapter did not rise with the fingers; calibrate pickup x/y/z and grip width")
+        if self.role == "arm1" and not self.reported_removal and second >= self.removal_check_time:
+            self.reported_removal = True
+            if not self.failed and self.adapter.getPosition()[0] > INSTALLED_TIP[0] - controls.REMOVAL_X_MARGIN:
+                self._fail("removal FAILED: adapter stayed near port A; calibrate installed pickup pose or grip width")
+
+    def _command_joints(self, second):
+        """沿預先計算的關節路徑線性內插；失敗後固定在當前姿態。"""
+        while self.next_point < len(self.trajectory) and second >= self.trajectory[self.next_point][0]:
+            self.next_point += 1
+        start_time, start_pose = self.trajectory[max(0, self.next_point - 1)]
+        if self.next_point < len(self.trajectory):
+            end_time, end_pose = self.trajectory[self.next_point]
             fraction = max(0.0, min(1.0, (second - start_time) / (end_time - start_time)))
             target = tuple(a + fraction * (b - a) for a, b in zip(start_pose, end_pose))
         else:
             target = start_pose
-        if abort_target is not None:
-            target = abort_target
-        for motor, joint in zip(motors, target):
+        if self.abort_target is not None:
+            target = self.abort_target
+        for motor, joint in zip(self.motors, target):
             motor.setPosition(joint)
-        if not reported_finish and second >= completion_time:
-            actual = tuple(sensor.getValue() for sensor in sensors)
-            joint_error = max(abs(value - desired) for value, desired in zip(actual, trajectory[-1][1]))
-            adapter_position = adapter.getPosition() if adapter is not None else None
-            floor_error = (
-                sum((a - b) ** 2 for a, b in zip(adapter_position, (PLACE_TIP[0], PLACE_TIP[1], 0.021))) ** 0.5
-                if role == "arm1" else 0.0
-            )
-            success = not stage_failed and joint_error < 0.05 and floor_error < 0.05
-            line = f"{second:.2f} {'complete' if success else 'FAILED'}; final joint error={joint_error:.4f} rad"
-            line += f"; joints={tuple(round(x, 3) for x in actual)}"
-            if adapter_position is not None:
-                line += f"; adapter={tuple(round(x, 4) for x in adapter_position)}; floor error={floor_error:.4f} m"
-            print(f"[router service {role}] {line}")
-            if trace:
-                trace.write(line + "\n")
-            reported_finish = True
+
+    def _report_completion(self, second):
+        """在兩支手臂時程結束後輸出關節與插座位置結果。"""
+        if self.reported_finish or second < self.completion_time:
+            return
+        actual = self._joint_angles()
+        joint_error = max(abs(value - desired) for value, desired in zip(actual, self.trajectory[-1][1]))
+        adapter_position = self.adapter.getPosition()
+        floor_error = (
+            sum((a - b) ** 2 for a, b in zip(adapter_position, (PLACE_TIP[0], PLACE_TIP[1], controls.FLOOR_TARGET_Z))) ** 0.5
+            if self.role == "arm1" else 0.0
+        )
+        success = (not self.failed and joint_error < controls.MAX_FINAL_JOINT_ERROR
+                   and floor_error < controls.MAX_FINAL_FLOOR_ERROR)
+        line = f"{second:.2f} {'complete' if success else 'FAILED'}; final joint error={joint_error:.4f} rad"
+        line += f"; joints={tuple(round(x, 3) for x in actual)}"
+        line += f"; adapter={tuple(round(x, 4) for x in adapter_position)}; floor error={floor_error:.4f} m"
+        self._print(line)
+        if self.trace is not None:
+            self.trace.write(line + "\n")
+        self.reported_finish = True
+
+    def _fail(self, message):
+        """停止後續事件，並以感測器實際關節角作為保持位置。"""
+        self.failed = True
+        self.abort_target = self._joint_angles()
+        self.next_cue = len(self.cues)
+        self._print(message)
+
+    def _joint_angles(self):
+        """讀取六個 UR5e 關節感測器。"""
+        return tuple(sensor.getValue() for sensor in self.sensors)
+
+    def _finger_angles(self):
+        """讀取兩片夾爪手指的實際角度。"""
+        return tuple(sensor.getValue() for sensor in self.gripper_sensors)
+
+    def _log_cue(self, second, label):
+        """同時將流程節點輸出至 Webots Console 與可選的追蹤檔。"""
+        self._print(f"{second:5.1f}s: {label}")
+        if self.trace is not None:
+            position = tuple(round(x, 4) for x in self.adapter.getPosition())
+            self.trace.write(f"{second:.2f} {label} adapter={position}\n")
+
+    def _print(self, message):
+        """統一 Console 訊息前綴，方便分辨兩支手臂。"""
+        print(f"[router service {self.role}] {message}")
+
+
+def main():
+    """由 Webots controllerArgs 選擇手臂角色並啟動控制流程。"""
+    if len(sys.argv) != 2 or sys.argv[1] not in ("arm1", "arm2"):
+        raise RuntimeError('Set controllerArgs to [ "arm1" ] or [ "arm2" ]')
+    DualArmTask(Supervisor(), sys.argv[1]).run()
+
+
 if __name__ == "__main__":
     main()

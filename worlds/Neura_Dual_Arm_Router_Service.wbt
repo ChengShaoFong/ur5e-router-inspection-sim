@@ -117,6 +117,54 @@ DEF ARM_2 UR5e {
   toolSlot [
     DEF CLEANING_HEAD Solid {
       children [
+        Pose {
+          translation -0.022 0 0.025
+          children [
+            Shape {
+              appearance DEF CleanerCameraBracket PBRAppearance {
+                baseColor 0.32 0.37 0.42
+                metalness 0.55
+                roughness 0.4
+              }
+              geometry Box { size 0.044 0.014 0.014 }
+            }
+          ]
+        }
+        Pose {
+          translation -0.04 0 0.045
+          children [
+            Shape {
+              appearance USE CleanerCameraBracket
+              geometry Box { size 0.014 0.014 0.045 }
+            }
+          ]
+        }
+        Pose {
+          translation -0.045 0 0.055
+          children [
+            Shape {
+              appearance PBRAppearance {
+                baseColor 0.08 0.12 0.18
+                roughness 0.55
+              }
+              geometry Box { size 0.03 0.028 0.03 }
+            }
+          ]
+        }
+        Camera {
+          translation -0.04 0 0.07
+          rotation 0 1 0 -1.25
+          name "adapter_socket_camera"
+          width 320
+          height 240
+          fieldOfView 0.8
+          near 0.01
+        }
+        Display {
+          name "adapter_socket_vision_display"
+          width 320
+          height 240
+        }
         Shape {
           appearance PBRAppearance {
             baseColor 0.18 0.22 0.26

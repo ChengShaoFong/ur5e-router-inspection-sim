@@ -6,8 +6,13 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "controllers" / "dual_arm_router_task"))
-from kinematics import TIP_OFFSET, forward_kinematics  # noqa: E402
-from plan import ARM1, ARM2, ARM_BASES, joint_trajectory  # noqa: E402
+from adapter_vision_config import AOI as ADAPTER_AOI, CAMERA_FOV as ADAPTER_FOV  # noqa: E402
+from adapter_vision_config import CAMERA_HEIGHT as ADAPTER_HEIGHT, CAMERA_WIDTH as ADAPTER_WIDTH  # noqa: E402
+from adapter_vision_config import CAMERA_TOOL_TRANSLATION, CAMERA_TOOL_Y_ROTATION  # noqa: E402
+from adapter_vision_config import REAR_FACE_TO_ORIGIN_X  # noqa: E402
+from kinematics import TIP_OFFSET, forward_kinematics, rotation  # noqa: E402
+from plan import ARM1, ARM2, ARM_BASES, PORT, joint_trajectory  # noqa: E402
+from vision_geometry import focal_pixels  # noqa: E402
 
 
 def tool_tip(role, joints):
@@ -18,6 +23,28 @@ def tool_tip(role, joints):
         + ARM_BASES[role][row]
         for row in range(3)
     )
+
+
+def adapter_pixel_from_arm2(joints):
+    """將標稱插座後端面投影到手臂二相機畫面。"""
+    frame = forward_kinematics(joints)
+    tool_rotation = [row[:3] for row in frame[:3]]
+    camera_rotation = rotation((0, 1, 0), CAMERA_TOOL_Y_ROTATION)
+    orientation = [
+        [sum(tool_rotation[row][k] * camera_rotation[k][column] for k in range(3)) for column in range(3)]
+        for row in range(3)
+    ]
+    position = [
+        frame[row][3] + ARM_BASES["arm2"][row]
+        + sum(tool_rotation[row][k] * CAMERA_TOOL_TRANSLATION[k] for k in range(3))
+        for row in range(3)
+    ]
+    rear_face = (PORT[0] - REAR_FACE_TO_ORIGIN_X, PORT[1], PORT[2])
+    delta = [rear_face[row] - position[row] for row in range(3)]
+    camera_ray = [sum(orientation[row][axis] * delta[row] for row in range(3)) for axis in range(3)]
+    focal = focal_pixels(ADAPTER_WIDTH, ADAPTER_FOV)
+    return (ADAPTER_WIDTH / 2 - focal * camera_ray[1] / camera_ray[0],
+            ADAPTER_HEIGHT / 2 - focal * camera_ray[2] / camera_ray[0])
 
 
 def verify():
@@ -36,9 +63,13 @@ def verify():
                 joints = tuple(a + fraction * (b - a) for a, b in zip(start, approach))
                 assert tool_tip(role, joints)[2] > 0.12
         if role == "arm2":
-            # The 20 cm cleaning head must clear the floor at rest.
+            # 20 cm 的清潔頭在待命位置必須離開地板。
             assert tool_tip(role, points[0][1])[2] > 0.25
             assert tool_tip(role, points[-1][1])[2] > 0.25
+            for second in (36, 41):
+                pixel_x, pixel_y = adapter_pixel_from_arm2(dict(points)[second])
+                assert ADAPTER_AOI[0] < pixel_x < ADAPTER_AOI[2]
+                assert ADAPTER_AOI[1] < pixel_y < ADAPTER_AOI[3]
         assert all(a[0] < b[0] for a, b in zip(points, points[1:]))
         by_time = {round(second, 6): joints for second, joints in points}
         if role == "arm1":

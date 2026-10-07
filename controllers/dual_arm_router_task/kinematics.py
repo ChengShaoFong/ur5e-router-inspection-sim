@@ -1,4 +1,4 @@
-"""UR5e tool-tip inverse kinematics for the dual-arm router demonstration."""
+"""UR5e 末端正向與逆向運動學；與任務時程、視覺辨識分離。"""
 
 import math
 
@@ -12,7 +12,7 @@ JOINT_NAMES = (
     "wrist_3_joint",
 )
 
-# Joint axes and link frames match Webots R2025a UR5e.proto.
+# 關節軸與連桿座標依 Webots R2025a 的 UR5e.proto。
 LINKS = (
     ((0, 0, 1), (0, 0, 0.163), (0, 0, 0.163), (0, 0, 1, 0)),
     ((0, 1, 0), (0, 0.138, 0), (0, 0.138, 0), (0, 1, 0, math.pi / 2)),
@@ -26,19 +26,19 @@ TIP_OFFSET = (0, 0, 0.20)
 LIMITS = ((-2 * math.pi, 2 * math.pi),) * 2 + ((-math.pi, math.pi),) + ((-2 * math.pi, 2 * math.pi),) * 3
 
 TOP_DOWN = ((1, 0, 0), (0, -1, 0), (0, 0, -1))
-# Tool local +Z points toward world +X, the insertion direction.
+# 工具局部 +Z 指向世界 +X，也就是插入方向。
 HORIZONTAL = ((0, 0, 1), (0, 1, 0), (-1, 0, 0))
 HORIZONTAL_ROLLED = ((0, 0, 1), (0, -1, 0), (1, 0, 0))
 
 
 def horizontal_roll(angle):
-    """Keep tool +Z on world +X while rolling around the insertion axis."""
+    """保持工具 +Z 沿世界 +X，並繞插入軸旋轉指定角度。"""
     sine, cosine = math.sin(angle), math.cos(angle)
     return ((0, 0, 1), (sine, cosine, 0), (-cosine, sine, 0))
 
 
 def interpolate_orientation(start, end, fraction):
-    """Interpolate between two world-space rotation matrices."""
+    """按 fraction 在兩個世界座標姿態間內插。"""
     vector = orientation_error(end, start)
     angle = math.sqrt(sum(value * value for value in vector))
     if angle < 1e-9:
@@ -51,14 +51,17 @@ def interpolate_orientation(start, end, fraction):
 
 
 def multiply(a, b):
+    """相乘兩個 4×4 齊次轉換矩陣。"""
     return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
 
 
 def translation(offset):
+    """建立指定 x/y/z 位移的齊次轉換矩陣。"""
     return [[1, 0, 0, offset[0]], [0, 1, 0, offset[1]], [0, 0, 1, offset[2]], [0, 0, 0, 1]]
 
 
 def rotation(axis, angle):
+    """建立繞指定軸旋轉 angle 弧度的矩陣。"""
     x, y, z = axis
     c, s = math.cos(angle), math.sin(angle)
     v = 1 - c
@@ -71,6 +74,7 @@ def rotation(axis, angle):
 
 
 def forward_kinematics(joints):
+    """由六個關節角求出工具安裝座在手臂底座座標中的姿態。"""
     frame = translation((0, 0, 0))
     for angle, (axis, anchor, endpoint, fixed) in zip(joints, LINKS):
         frame = multiply(frame, translation(anchor))
@@ -82,6 +86,7 @@ def forward_kinematics(joints):
 
 
 def orientation_error(target, current):
+    """以旋轉向量表示目標姿態相對目前姿態的誤差。"""
     relative = [[sum(target[i][k] * current[j][k] for k in range(3)) for j in range(3)] for i in range(3)]
     skew = [
         (relative[2][1] - relative[1][2]) / 2,
@@ -95,7 +100,7 @@ def orientation_error(target, current):
         return [value * angle / sine for value in skew]
     if cosine > 0:
         return [0.0, 0.0, 0.0]
-    # At 180 degrees the skew part vanishes; recover an axis from the diagonal.
+    # 轉角為 180 度時反對稱部分消失，從對角線恢復旋轉軸。
     axis = [math.sqrt(max(0.0, (relative[i][i] + 1) / 2)) for i in range(3)]
     largest = max(range(3), key=lambda i: axis[i])
     for i in range(3):
@@ -105,6 +110,7 @@ def orientation_error(target, current):
 
 
 def solve_linear(matrix, vector):
+    """用帶選主元的消去法解線性方程組。"""
     count = len(vector)
     rows = [matrix[i][:] + [vector[i]] for i in range(count)]
     for column in range(count):
@@ -122,7 +128,7 @@ def solve_linear(matrix, vector):
 
 
 def solve_pose(world_tip, orientation, base, seed=None):
-    """Find UR5e joints for a tool tip in world coordinates; base has no yaw."""
+    """依世界座標工具點與姿態求 UR5e 關節角；底座沒有額外偏航。"""
     target = [
         world_tip[i] - base[i] - sum(orientation[i][k] * TIP_OFFSET[k] for k in range(3))
         for i in range(3)
