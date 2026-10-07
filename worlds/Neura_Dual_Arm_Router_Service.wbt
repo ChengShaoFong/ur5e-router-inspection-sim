@@ -8,17 +8,21 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 
 WorldInfo {
   gravity 9.81
-  basicTimeStep 16
+  basicTimeStep 8
   contactProperties [
     ContactProperties {
       material1 "adapter_shell"
       material2 "default"
       coulombFriction 1.2
+      bounce 0
+      maxContactJoints 4
     }
     ContactProperties {
       material1 "ROBOTIQ gripper pad"
       material2 "adapter_shell"
       coulombFriction 3
+      bounce 0
+      maxContactJoints 4
     }
   ]
 }

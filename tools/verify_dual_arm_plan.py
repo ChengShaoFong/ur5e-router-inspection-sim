@@ -37,9 +37,17 @@ def verify():
         by_time = {round(second, 6): joints for second, joints in points}
         if role == "arm1":
             # Closing the fingers must not start the lift trajectory.
-            for second in (8, 9, 10):
-                assert math.dist(tool_tip(role, by_time[second]), tool_tip(role, by_time[6])) < 0.001
-            assert tool_tip(role, by_time[11])[2] > tool_tip(role, by_time[10])[2] + 0.05
+            close = next(c.second for c in cues if c.label == "close gripper on adapter")
+            hold = next(c.second for c in cues if c.label == "hold while fingers close")
+            lower = next(c.second for c in cues if c.label == "lower fingers around adapter")
+            lift = next(c.second for c in cues if c.label == "lift adapter")
+            for second in (close, hold):
+                assert math.dist(tool_tip(role, by_time[second]), tool_tip(role, by_time[lower])) < 0.001
+            midpoint = round((hold + lift) / 2, 6)
+            assert tool_tip(role, by_time[midpoint])[2] > tool_tip(role, by_time[hold])[2] + 0.05
+            installed_close = next(c.second for c in cues if c.label == "close gripper on installed adapter")
+            unlock = next(c.second for c in cues if c.label == "wait for port unlock")
+            assert math.dist(tool_tip(role, by_time[installed_close]), tool_tip(role, by_time[unlock])) < 0.001
         for cue in cues:
             if cue.tip is not None:
                 error = math.dist(tool_tip(role, by_time[round(cue.second, 6)]), cue.tip)

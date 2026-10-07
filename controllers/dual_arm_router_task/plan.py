@@ -34,7 +34,7 @@ ARM1 = (
     Cue(0, "home", grip=0.0),
     Cue(2, "approach adapter", (PICKUP_TIP[0], PICKUP_TIP[1], PICKUP_TIP[2] + 0.218), TOP_DOWN),
     Cue(6, "lower fingers around adapter", PICKUP_TIP, TOP_DOWN),
-    Cue(8, "close gripper on adapter", grip=CLOSED_ANGLE),
+    Cue(7, "close gripper on adapter", grip=CLOSED_ANGLE),
     Cue(10, "hold while fingers close", PICKUP_TIP, TOP_DOWN),
     Cue(12, "lift adapter", (PICKUP_TIP[0], PICKUP_TIP[1], PICKUP_TIP[2] + 0.248), TOP_DOWN),
     Cue(15, "carry to router", (0.43, 0.08, 0.40), TOP_DOWN),
