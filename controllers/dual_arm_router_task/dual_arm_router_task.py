@@ -2,14 +2,17 @@
 
 import os
 import sys
+import math
 from collections import deque
 from dataclasses import replace
 from pathlib import Path
+from statistics import median
 
 from controller import Supervisor
 
 from kinematics import JOINT_NAMES, TIP_OFFSET, forward_kinematics
-from plan import ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP, PLACE_TIP, joint_trajectory
+from plan import ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP, PLACE_TIP, PORT, joint_trajectory
+from port_vision import AOI, CAMERA_HEIGHT, CAMERA_WIDTH, locate_port
 
 TIME_STEP = 32
 MAX_JOINT_SPEED = 2.5
@@ -35,6 +38,11 @@ def main():
         sensor.enable(TIME_STEP)
     for motor in motors:
         motor.setVelocity(MAX_JOINT_SPEED)
+    if role == "arm1":
+        # Initialize the gripper above the floor before physics advances.
+        for motor, angle in zip(motors, trajectory[0][1]):
+            joint = robot.getFromDevice(motor._tag).getParentNode()
+            joint.setJointPosition(angle)
 
     gripper = ()
     gripper_sensors = ()
@@ -42,6 +50,14 @@ def main():
     if adapter is None:
         raise RuntimeError("SERVICE_ADAPTER is missing from the world")
     if role == "arm1":
+        camera = robot.getDevice("port_a_camera")
+        camera.enable(128)
+        camera_node = robot.getFromDevice(camera._tag)
+        router_node = robot.getFromDef("ROUTER")
+        display = robot.getDevice("port_a_vision_display")
+        display.attachCamera(camera)
+        display.setColor(0x00FF00)
+        display.drawRectangle(AOI[0], AOI[1], AOI[2] - AOI[0], AOI[3] - AOI[1])
         gripper = tuple(robot.getDevice(name) for name in (
             "ROBOTIQ 2F-140 Gripper::left finger joint",
             "ROBOTIQ 2F-140 Gripper::right finger joint",
@@ -63,8 +79,41 @@ def main():
     abort_target = None
     grip_history = deque(maxlen=20)
     grasp_start_position = None
+    latest_port_vision = None
+    vision_history = deque(maxlen=5)
+    last_vision_time = -1.0
     while robot.step(TIME_STEP) != -1:
         second = robot.getTime()
+        if role == "arm1" and 18.5 <= second <= 20.0 and second - last_vision_time >= 0.128:
+            last_vision_time = second
+            # Clear the previous overlay so old detection rectangles do not
+            # accumulate over the camera image.
+            display.setAlpha(0.0)
+            display.fillRectangle(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT)
+            display.setAlpha(1.0)
+            display.setColor(0x00FF00)
+            display.drawRectangle(AOI[0], AOI[1], AOI[2] - AOI[0], AOI[3] - AOI[1])
+            detection = locate_port(
+                camera.getImage(), camera_node.getPosition(), camera_node.getOrientation(),
+                router_node.getPosition()[0] - 0.114,
+            )
+            if detection is None:
+                vision_history.clear()
+            else:
+                world_y, world_z, bounding_box, confidence = detection
+                if (math.isfinite(world_y) and math.isfinite(world_z) and confidence >= 0.2
+                        and abs(world_y - PORT[1]) < 0.05 and abs(world_z - PORT[2]) < 0.05):
+                    vision_history.append((world_y, world_z))
+                    left, top, right, bottom = bounding_box
+                    display.setColor(0x00FFFF)
+                    display.drawRectangle(left, top, right - left, bottom - top)
+                    ys, zs = zip(*vision_history)
+                    if (len(vision_history) == vision_history.maxlen
+                            and max(ys) - min(ys) < 0.0025
+                            and max(zs) - min(zs) < 0.0025):
+                        latest_port_vision = {"time": second, "y": median(ys), "z": median(zs)}
+                else:
+                    vision_history.clear()
         if gripper_sensors:
             grip_history.append(tuple(sensor.getValue() for sensor in gripper_sensors))
         while next_cue < len(cues) and second >= cues[next_cue].second:
@@ -107,8 +156,17 @@ def main():
                     print(f"[router service {role}] grasp FAILED: fingers settled={settled}, contact inferred={physical_contact}, adapter moved={moved:.3f} m; inspect x/y/z and contact geometry")
                     break
                 print(f"[router service {role}] fingers settled; adapter moved {moved:.3f} m during closing")
-            if role == "arm1" and cue.label == "align with port A" and not stage_failed:
+            if role == "arm1" and cue.label == "capture and locate port A" and not stage_failed:
                 actual_joints = tuple(sensor.getValue() for sensor in sensors)
+                capture_dir = Path(trace_dir) if trace_dir else Path(__file__).resolve().parents[2] / ".dual-arm-runtime"
+                capture_dir.mkdir(parents=True, exist_ok=True)
+                camera.saveImage(str(capture_dir / "port_a_capture.png"), 100)
+                if latest_port_vision is None or second - latest_port_vision["time"] > 0.5:
+                    stage_failed = True
+                    abort_target = actual_joints
+                    next_cue = len(cues)
+                    print(f"[router service {role}] alignment FAILED: stopped hand camera did not localize port A")
+                    break
                 frame = forward_kinematics(actual_joints)
                 tip = tuple(
                     frame[row][3]
@@ -123,11 +181,15 @@ def main():
                     next_cue = len(cues)
                     print(f"[router service {role}] alignment FAILED: adapter slipped {offset}; adjust physical grip before insertion")
                     break
-                corrected_tip = tuple(goal - delta for goal, delta in zip(INSERTION_TIP, offset))
+                corrected_tip = (
+                    INSERTION_TIP[0] - offset[0],
+                    INSERTION_TIP[1] + float(latest_port_vision["y"]) - PORT[1] - offset[1],
+                    INSERTION_TIP[2] + float(latest_port_vision["z"]) - PORT[2] - offset[2],
+                )
                 cues = tuple(replace(item, tip=corrected_tip) if item.label == "insert adapter in port A" else item for item in cues)
                 trajectory = joint_trajectory(role, cues)
                 next_point = 0
-                print(f"[router service {role}] measured adapter offset={tuple(round(v, 4) for v in offset)}; corrected insertion tip={tuple(round(v, 4) for v in corrected_tip)}")
+                print(f"[router service {role}] camera port y/z={(round(float(latest_port_vision['y']), 4), round(float(latest_port_vision['z']), 4))}; adapter offset={tuple(round(v, 4) for v in offset)}; corrected insertion tip={tuple(round(v, 4) for v in corrected_tip)}")
         if role == "arm1" and not reported_pickup and second >= pickup_check_time:
             reported_pickup = True
             if not stage_failed and adapter.getPosition()[2] < 0.10:

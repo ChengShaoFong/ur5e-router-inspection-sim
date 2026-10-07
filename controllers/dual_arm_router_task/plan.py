@@ -9,7 +9,8 @@ from kinematics import HORIZONTAL, HORIZONTAL_ROLLED, TOP_DOWN, horizontal_roll,
 
 
 ARM_BASES = {"arm1": (0.0, 0.35, 0.0), "arm2": (0.0, -0.35, 0.0)}
-HOME = (0.0, -1.0, 1.8, 0.0, 0.0, 0.0)
+# Arm 1 starts with its gripper tip above the floor while its base stays grounded.
+HOME = (0.0, -1.246, 1.685, 0.208, 0.0, 0.153)
 HOMES = {"arm1": HOME, "arm2": (0.0, -1.7, 1.6, 0.0, 0.0, 0.0)}
 FLOOR = (0.34, 0.33, 0.030)
 PORT = (0.60, 0.08, 0.30)
@@ -38,7 +39,8 @@ ARM1 = (
     Cue(10, "hold while fingers close", PICKUP_TIP, TOP_DOWN),
     Cue(13, "lift adapter", (PICKUP_TIP[0], PICKUP_TIP[1], PICKUP_TIP[2] + 0.248), TOP_DOWN),
     Cue(15, "carry to router", (0.43, 0.08, 0.40), TOP_DOWN),
-    Cue(18, "align with port A", (0.515, 0.08, 0.300), TOP_DOWN),
+    Cue(18, "stop in front of port A", (0.515, 0.08, 0.300), TOP_DOWN),
+    Cue(20, "capture and locate port A"),
     Cue(22, "insert adapter in port A", INSERTION_TIP, TOP_DOWN),
     Cue(24, "release adapter", grip=0.0),
     Cue(27, "clear port", (0.43, 0.08, 0.300), TOP_DOWN),

@@ -29,6 +29,12 @@ def verify():
     for role, cues in (("arm1", ARM1), ("arm2", ARM2)):
         points = joint_trajectory(role, cues)
         assert points[0][0] == 0
+        if role == "arm1":
+            start, approach = points[0][1], points[1][1]
+            for step in range(21):
+                fraction = step / 20
+                joints = tuple(a + fraction * (b - a) for a, b in zip(start, approach))
+                assert tool_tip(role, joints)[2] > 0.12
         if role == "arm2":
             # The 20 cm cleaning head must clear the floor at rest.
             assert tool_tip(role, points[0][1])[2] > 0.25
@@ -36,6 +42,11 @@ def verify():
         assert all(a[0] < b[0] for a, b in zip(points, points[1:]))
         by_time = {round(second, 6): joints for second, joints in points}
         if role == "arm1":
+            front = next(c.second for c in cues if c.label == "stop in front of port A")
+            capture = next(c.second for c in cues if c.label == "capture and locate port A")
+            insert = next(c.second for c in cues if c.label == "insert adapter in port A")
+            assert front < capture < insert
+            assert by_time[front] == by_time[capture]
             # Closing the fingers must not start the lift trajectory.
             close = next(c.second for c in cues if c.label == "close gripper on adapter")
             hold = next(c.second for c in cues if c.label == "hold while fingers close")
