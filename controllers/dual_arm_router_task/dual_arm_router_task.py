@@ -1,4 +1,4 @@
-"""Two UR5e actors for physical adapter docking and cleaning-head insertion."""
+"""Two UR5e actors for friction gripping and cleaning-head insertion."""
 
 import os
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 from controller import Robot, Supervisor
 
 from kinematics import JOINT_NAMES
-from plan import ARM1, ARM2, joint_trajectory
+from plan import ARM1, ARM2, INSTALLED_TIP, PLACE_TIP, joint_trajectory
 
 
 TIME_STEP = 32
@@ -31,7 +31,6 @@ def main():
         motor.setVelocity(MAX_JOINT_SPEED)
 
     gripper = ()
-    grasp_latch = None
     adapter = None
     if role == "arm1":
         gripper = tuple(robot.getDevice(name) for name in (
@@ -41,23 +40,17 @@ def main():
         adapter = robot.getFromDef("SERVICE_ADAPTER")
         if adapter is None:
             raise RuntimeError("SERVICE_ADAPTER is missing from the world")
-        grasp_latch = robot.getDevice("gripper_grasp_latch")
-        if grasp_latch is None:
-            raise RuntimeError("gripper_grasp_latch is missing from arm 1")
-        grasp_latch.enablePresence(TIME_STEP)
 
     next_cue = 0
     next_point = 0
     reported_finish = False
+    reported_pickup = False
+    reported_removal = False
+    stage_failed = False
     while robot.step(TIME_STEP) != -1:
         second = robot.getTime()
         while next_cue < len(cues) and second >= cues[next_cue].second:
             cue = cues[next_cue]
-            if grasp_latch is not None:
-                if cue.label in ("grasp adapter", "grasp installed adapter"):
-                    grasp_latch.lock()
-                elif cue.label in ("release adapter", "release adapter on floor"):
-                    grasp_latch.unlock()
             if cue.grip is not None:
                 for motor in gripper:
                     motor.setVelocity(0.8)
@@ -67,9 +60,18 @@ def main():
                 line = f"{second:.2f} {cue.label}"
                 if adapter is not None:
                     line += f" adapter={tuple(round(x, 4) for x in adapter.getPosition())}"
-                    line += f" grasp_presence={grasp_latch.getPresence()}"
                 trace.write(line + "\n")
             next_cue += 1
+        if adapter is not None and not reported_pickup and second >= 11:
+            reported_pickup = True
+            if adapter.getPosition()[2] < 0.10:
+                stage_failed = True
+                print(f"[router service {role}] pickup FAILED: adapter did not rise with the fingers; calibrate pickup x/y/z and grip width")
+        if adapter is not None and not reported_removal and second >= 71:
+            reported_removal = True
+            if adapter.getPosition()[0] > INSTALLED_TIP[0] - 0.04:
+                stage_failed = True
+                print(f"[router service {role}] removal FAILED: adapter stayed near port A; calibrate installed pickup pose or grip width")
         while next_point < len(trajectory) and second >= trajectory[next_point][0]:
             next_point += 1
         start_time, start_pose = trajectory[max(0, next_point - 1)]
@@ -86,10 +88,10 @@ def main():
             joint_error = max(abs(value - desired) for value, desired in zip(actual, trajectory[-1][1]))
             adapter_position = adapter.getPosition() if adapter is not None else None
             floor_error = (
-                sum((a - b) ** 2 for a, b in zip(adapter_position, (0.34, 0.33, 0.021))) ** 0.5
+                sum((a - b) ** 2 for a, b in zip(adapter_position, (PLACE_TIP[0], PLACE_TIP[1], 0.021))) ** 0.5
                 if adapter_position is not None else 0.0
             )
-            success = joint_error < 0.05 and floor_error < 0.05
+            success = not stage_failed and joint_error < 0.05 and floor_error < 0.05
             line = f"{second:.2f} {'complete' if success else 'FAILED'}; final joint error={joint_error:.4f} rad"
             line += f"; joints={tuple(round(x, 3) for x in actual)}"
             if adapter_position is not None:
