@@ -11,7 +11,6 @@ from controller import Supervisor
 from kinematics import JOINT_NAMES, TIP_OFFSET, forward_kinematics
 from plan import ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP, PLACE_TIP, joint_trajectory
 
-
 TIME_STEP = 32
 MAX_JOINT_SPEED = 2.5
 
