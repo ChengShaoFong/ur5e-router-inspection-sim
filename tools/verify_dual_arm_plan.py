@@ -35,6 +35,11 @@ def verify():
             assert tool_tip(role, points[-1][1])[2] > 0.25
         assert all(a[0] < b[0] for a, b in zip(points, points[1:]))
         by_time = {round(second, 6): joints for second, joints in points}
+        if role == "arm1":
+            # Closing the fingers must not start the lift trajectory.
+            for second in (8, 9, 10):
+                assert math.dist(tool_tip(role, by_time[second]), tool_tip(role, by_time[6])) < 0.001
+            assert tool_tip(role, by_time[11])[2] > tool_tip(role, by_time[10])[2] + 0.05
         for cue in cues:
             if cue.tip is not None:
                 error = math.dist(tool_tip(role, by_time[round(cue.second, 6)]), cue.tip)

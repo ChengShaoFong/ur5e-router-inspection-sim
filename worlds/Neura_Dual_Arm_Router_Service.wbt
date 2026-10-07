@@ -60,6 +60,7 @@ DEF ARM_2 UR5e {
   controllerArgs [
     "arm2"
   ]
+  supervisor TRUE
   selfCollision FALSE
   toolSlot [
     DEF CLEANING_HEAD Solid {

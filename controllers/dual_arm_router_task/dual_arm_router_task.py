@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from controller import Robot, Supervisor
+from controller import Supervisor
 
 from kinematics import JOINT_NAMES
 from plan import ARM1, ARM2, INSTALLED_TIP, PLACE_TIP, joint_trajectory
@@ -18,7 +18,7 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in ("arm1", "arm2"):
         raise RuntimeError("Set controllerArgs to [ \"arm1\" ] or [ \"arm2\" ]")
     role = sys.argv[1]
-    robot = Supervisor() if role == "arm1" else Robot()
+    robot = Supervisor()
     cues = ARM1 if role == "arm1" else ARM2
     trajectory = joint_trajectory(role, cues)
     trace_dir = os.environ.get("DUAL_ARM_TRACE_DIR")
@@ -31,22 +31,23 @@ def main():
         motor.setVelocity(MAX_JOINT_SPEED)
 
     gripper = ()
-    adapter = None
+    adapter = robot.getFromDef("SERVICE_ADAPTER")
+    if adapter is None:
+        raise RuntimeError("SERVICE_ADAPTER is missing from the world")
     if role == "arm1":
         gripper = tuple(robot.getDevice(name) for name in (
             "ROBOTIQ 2F-140 Gripper::left finger joint",
             "ROBOTIQ 2F-140 Gripper::right finger joint",
         ))
-        adapter = robot.getFromDef("SERVICE_ADAPTER")
-        if adapter is None:
-            raise RuntimeError("SERVICE_ADAPTER is missing from the world")
 
     next_cue = 0
     next_point = 0
     reported_finish = False
     reported_pickup = False
     reported_removal = False
+    checked_installation = False
     stage_failed = False
+    abort_target = None
     while robot.step(TIME_STEP) != -1:
         second = robot.getTime()
         while next_cue < len(cues) and second >= cues[next_cue].second:
@@ -62,15 +63,27 @@ def main():
                     line += f" adapter={tuple(round(x, 4) for x in adapter.getPosition())}"
                 trace.write(line + "\n")
             next_cue += 1
-        if adapter is not None and not reported_pickup and second >= 11:
+        if role == "arm1" and not reported_pickup and second >= 13:
             reported_pickup = True
             if adapter.getPosition()[2] < 0.10:
                 stage_failed = True
+                abort_target = tuple(sensor.getValue() for sensor in sensors)
+                next_cue = len(cues)
                 print(f"[router service {role}] pickup FAILED: adapter did not rise with the fingers; calibrate pickup x/y/z and grip width")
-        if adapter is not None and not reported_removal and second >= 71:
-            reported_removal = True
-            if adapter.getPosition()[0] > INSTALLED_TIP[0] - 0.04:
+        if role == "arm2" and not checked_installation and second >= 34:
+            checked_installation = True
+            position = adapter.getPosition()
+            if position[0] < 0.55 or abs(position[1] - 0.08) > 0.04 or position[2] < 0.24:
                 stage_failed = True
+                abort_target = tuple(sensor.getValue() for sensor in sensors)
+                next_cue = len(cues)
+                print(f"[router service {role}] cleaning SKIPPED: adapter is not installed in port A")
+        if role == "arm1" and not reported_removal and second >= 71:
+            reported_removal = True
+            if not stage_failed and adapter.getPosition()[0] > INSTALLED_TIP[0] - 0.04:
+                stage_failed = True
+                abort_target = tuple(sensor.getValue() for sensor in sensors)
+                next_cue = len(cues)
                 print(f"[router service {role}] removal FAILED: adapter stayed near port A; calibrate installed pickup pose or grip width")
         while next_point < len(trajectory) and second >= trajectory[next_point][0]:
             next_point += 1
@@ -81,6 +94,8 @@ def main():
             target = tuple(a + fraction * (b - a) for a, b in zip(start_pose, end_pose))
         else:
             target = start_pose
+        if abort_target is not None:
+            target = abort_target
         for motor, joint in zip(motors, target):
             motor.setPosition(joint)
         if not reported_finish and second >= 86:
@@ -89,7 +104,7 @@ def main():
             adapter_position = adapter.getPosition() if adapter is not None else None
             floor_error = (
                 sum((a - b) ** 2 for a, b in zip(adapter_position, (PLACE_TIP[0], PLACE_TIP[1], 0.021))) ** 0.5
-                if adapter_position is not None else 0.0
+                if role == "arm1" else 0.0
             )
             success = not stage_failed and joint_error < 0.05 and floor_error < 0.05
             line = f"{second:.2f} {'complete' if success else 'FAILED'}; final joint error={joint_error:.4f} rad"
