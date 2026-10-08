@@ -1,4 +1,4 @@
-"""Lock the service adapter to port A, then release it for arm 1 retrieval."""
+"""依任務點位順序控制 Router 插孔的鎖扣。"""
 
 import os
 import sys
@@ -7,42 +7,41 @@ from pathlib import Path
 from controller import Robot
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dual_arm_router_task"))
-from plan import ARM1, ARM2
+from plan import ARM1, ARM2, RUN_ORDER, CueEvent
 
-cue_times = {cue.label: cue.second for cue in ARM1}
-insert_check_time = cue_times["release adapter"]
-cleaning_check_time = ARM2[-1].second
-release_time = cue_times["wait for port unlock"]
+
+def cue_time(cues, event, point_id):
+    """取得指定點位事件的模擬秒數。"""
+    return next(cue.second for cue in cues if cue.event == event and cue.point_id == point_id)
+
 
 robot = Robot()
-latch = robot.getDevice("port_a_latch")
-latch.enablePresence(32)
+latches = {name: robot.getDevice(f"{name}_latch") for name in RUN_ORDER}
+for latch in latches.values():
+    latch.enablePresence(32)
+
 trace_dir = os.environ.get("DUAL_ARM_TRACE_DIR")
 trace = open(Path(trace_dir) / "router.log", "w", encoding="utf-8", buffering=1) if trace_dir else None
-locked = False
-released = False
-reported_insert = False
-reported_cleaning = False
+events = []
+for point_id in RUN_ORDER:
+    events.extend((
+        (cue_time(ARM1, CueEvent.INSERT_ADAPTER, point_id) + 2, point_id, "insert"),
+        (cue_time(ARM2, CueEvent.WITHDRAW_CLEANER, point_id) + 4, point_id, "clean"),
+        (cue_time(ARM1, CueEvent.REMOVE_ADAPTER, point_id) - 4, point_id, "unlock"),
+    ))
+events.sort()
+next_event = 0
+
+for latch in latches.values():
+    latch.lock()
 
 while robot.step(32) != -1:
     second = robot.getTime()
-    if not locked:
-        latch.lock()
-        locked = True
+    while next_event < len(events) and second >= events[next_event][0]:
+        _, point_id, action = events[next_event]
+        latch = latches[point_id]
         if trace:
-            trace.write(f"{second:.2f} armed port A latch\n")
-    if not reported_insert and second >= insert_check_time:
-        if trace:
-            trace.write(f"{second:.2f} inserted presence={latch.getPresence()} locked={latch.isLocked()}\n")
-        reported_insert = True
-    if not reported_cleaning and second >= cleaning_check_time:
-        if trace:
-            trace.write(f"{second:.2f} after cleaning presence={latch.getPresence()} locked={latch.isLocked()}\n")
-        reported_cleaning = True
-    if not released and second >= release_time:
-        if trace:
-            trace.write(f"{second:.2f} port presence={latch.getPresence()}\n")
-        latch.unlock()
-        released = True
-        if trace:
-            trace.write(f"{second:.2f} released port A latch\n")
+            trace.write(f"{second:.2f} {point_id} {action} presence={latch.getPresence()} locked={latch.isLocked()}\n")
+        if action == "unlock":
+            latch.unlock()
+        next_event += 1

@@ -8,16 +8,14 @@ from pathlib import Path
 
 from controller import Supervisor
 
-import adapter_vision_config as adapter_config
-import control_config as controls
+from settings import adapter_vision as adapter_config, control as controls, port_vision as port_config
 from adapter_vision_tracker import AdapterVisionTracker
 from kinematics import JOINT_NAMES, TIP_OFFSET, forward_kinematics
 from plan import (
     ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP,
-    PLACE_TIP, PORT, CueEvent, joint_trajectory,
+    PLACE_TIP, PORT, POINTS, RUN_ORDER, CueEvent, joint_trajectory,
 )
 from vision_tracker import PortVisionTracker
-from vision_config import SETTLE_SECONDS
 
 
 GRIPPER_MOTORS = (
@@ -30,9 +28,10 @@ GRIPPER_SENSORS = (
 )
 
 
-def event_time(cues, event):
+def event_time(cues, event, point_id=None):
     """取得指定流程事件的秒數；沒有該事件時回傳無限大。"""
-    return next((cue.second for cue in cues if cue.event == event), float("inf"))
+    return next((cue.second for cue in cues if cue.event == event
+                 and (point_id is None or cue.point_id == point_id)), float("inf"))
 
 
 def measured_tool_tip(role, joints):
@@ -46,10 +45,10 @@ def measured_tool_tip(role, joints):
     )
 
 
-def corrected_insertion_tip(adapter_offset, port_y, port_z):
+def corrected_insertion_tip(adapter_offset, port_y, port_z, point_id="port_a"):
     """結合視覺對位與實際夾持偏移，計算插入時的工具點。"""
     return (
-        INSERTION_TIP[0] - adapter_offset[0],
+        INSERTION_TIP[0] + POINTS[point_id][0] - PORT[0] - adapter_offset[0],
         INSERTION_TIP[1] + port_y - PORT[1] - adapter_offset[1],
         INSERTION_TIP[2] + port_z - PORT[2] - adapter_offset[2],
     )
@@ -65,8 +64,11 @@ class DualArmTask:
         self.cues = ARM1 if role == "arm1" else ARM2
         self.trajectory = joint_trajectory(role, self.cues)
         self.pickup_check_time = event_time(self.cues, CueEvent.LIFT_ADAPTER) + controls.PICKUP_CHECK_DELAY
-        self.removal_check_time = event_time(self.cues, CueEvent.REMOVE_ADAPTER) + controls.REMOVAL_CHECK_DELAY
-        self.cleaner_insert_time = event_time(ARM2, CueEvent.INSERT_CLEANER)
+        self.removal_checks = [(event_time(self.cues, CueEvent.REMOVE_ADAPTER, name)
+                                + controls.REMOVAL_CHECK_DELAY, name) for name in RUN_ORDER]
+        self.next_removal_check = 0
+        self.active_point_id = RUN_ORDER[0]
+        self.cleaner_insert_time = event_time(ARM2, CueEvent.INSERT_CLEANER, self.active_point_id)
         self.completion_time = max(ARM1[-1].second, ARM2[-1].second) + controls.COMPLETION_DELAY
 
         trace_path = os.environ.get("DUAL_ARM_TRACE_DIR")
@@ -101,14 +103,14 @@ class DualArmTask:
             self.gripper_sensors = tuple(robot.getDevice(name) for name in GRIPPER_SENSORS)
             for sensor in self.gripper_sensors:
                 sensor.enable(controls.TIME_STEP_MS)
-            capture_start = event_time(self.cues, CueEvent.STOP_IN_FRONT) + SETTLE_SECONDS
+            capture_start = event_time(self.cues, CueEvent.STOP_IN_FRONT) + port_config.SETTLE_SECONDS
             capture_end = event_time(self.cues, CueEvent.CAPTURE_PORT)
             self.vision = PortVisionTracker(robot, capture_start, capture_end)
         else:
             capture_start = event_time(self.cues, CueEvent.ARM1_CLEAR_PORT) + adapter_config.SETTLE_SECONDS
             self.adapter_vision = AdapterVisionTracker(robot, capture_start, self.cleaner_insert_time)
 
-        self.applied_adapter_pose = PORT
+        self.applied_adapter_pose = POINTS[self.active_point_id]
         self.last_adapter_replan_time = float("-inf")
 
         self.next_cue = 0
@@ -118,7 +120,6 @@ class DualArmTask:
         self.grip_history = deque(maxlen=controls.GRIP_HISTORY_SAMPLES)
         self.grasp_start_position = None
         self.reported_pickup = False
-        self.reported_removal = False
         self.reported_finish = False
 
     def _set_initial_arm_pose(self):
@@ -157,6 +158,16 @@ class DualArmTask:
             self.next_cue += 1
             if cue.event == CueEvent.CHECK_GRASP:
                 self._check_grasp()
+            elif cue.event == CueEvent.STOP_IN_FRONT:
+                self.active_point_id = cue.point_id
+                self.vision.set_target(cue.point_id, cue.second + port_config.SETTLE_SECONDS,
+                                       event_time(self.cues, CueEvent.CAPTURE_PORT, cue.point_id))
+            elif cue.event == CueEvent.ARM1_CLEAR_PORT:
+                self.active_point_id = cue.point_id
+                self.cleaner_insert_time = event_time(self.cues, CueEvent.INSERT_CLEANER, cue.point_id)
+                self.applied_adapter_pose = POINTS[cue.point_id]
+                self.adapter_vision.set_target(cue.point_id, cue.second + adapter_config.SETTLE_SECONDS,
+                                               self.cleaner_insert_time)
             elif cue.event == CueEvent.CAPTURE_PORT and not self.failed:
                 self._capture_and_align(second)
             elif cue.event == CueEvent.INSERT_CLEANER and not self.failed:
@@ -208,7 +219,7 @@ class DualArmTask:
         self.vision.save_capture(self.capture_dir)
         port = self.vision.recent(second)
         if port is None:
-            self._fail("alignment FAILED: stopped hand camera did not localize port A")
+            self._fail(f"alignment FAILED: stopped hand camera did not localize {self.active_point_id}")
             return
 
         joints = self._joint_angles()
@@ -218,9 +229,10 @@ class DualArmTask:
             self._fail(f"alignment FAILED: adapter slipped {offset}; adjust physical grip before insertion")
             return
 
-        target = corrected_insertion_tip(offset, port.y, port.z)
+        target = corrected_insertion_tip(offset, port.y, port.z, self.active_point_id)
         self.cues = tuple(
-            replace(cue, tip=target) if cue.event == CueEvent.INSERT_ADAPTER else cue
+            replace(cue, tip=target) if cue.event == CueEvent.INSERT_ADAPTER
+            and cue.point_id == self.active_point_id else cue
             for cue in self.cues
         )
         self.trajectory = joint_trajectory(self.role, self.cues)
@@ -243,15 +255,15 @@ class DualArmTask:
         if (movement < adapter_config.MIN_REPLAN_SHIFT
                 or second - self.last_adapter_replan_time < adapter_config.MIN_REPLAN_INTERVAL):
             return
-        delta = tuple(a - b for a, b in zip(observed, PORT))
+        delta = tuple(a - b for a, b in zip(observed, POINTS[self.active_point_id]))
         shifted_events = {
             CueEvent.APPROACH_SOCKET, CueEvent.INSERT_CLEANER,
             CueEvent.ROTATE_CLEANER, CueEvent.WITHDRAW_CLEANER,
         }
         updated = tuple(
-            replace(cue, tip=tuple(value + shift for value, shift in zip(cue.tip, delta)))
-            if cue.event in shifted_events else cue
-            for cue in ARM2
+            replace(cue, tip=tuple(value + shift for value, shift in zip(base.tip, delta)))
+            if cue.event in shifted_events and cue.point_id == self.active_point_id else cue
+            for cue, base in zip(self.cues, ARM2)
         )
         try:
             trajectory = joint_trajectory(self.role, updated)
@@ -277,10 +289,13 @@ class DualArmTask:
             self.reported_pickup = True
             if not self.failed and self.adapter.getPosition()[2] < controls.PICKUP_MIN_HEIGHT:
                 self._fail("pickup FAILED: adapter did not rise with the fingers; calibrate pickup x/y/z and grip width")
-        if self.role == "arm1" and not self.reported_removal and second >= self.removal_check_time:
-            self.reported_removal = True
-            if not self.failed and self.adapter.getPosition()[0] > INSTALLED_TIP[0] - controls.REMOVAL_X_MARGIN:
-                self._fail("removal FAILED: adapter stayed near port A; calibrate installed pickup pose or grip width")
+        if self.role == "arm1" and self.next_removal_check < len(self.removal_checks):
+            check_time, point_id = self.removal_checks[self.next_removal_check]
+            if second >= check_time:
+                self.next_removal_check += 1
+                installed_x = INSTALLED_TIP[0] + POINTS[point_id][0] - PORT[0]
+                if not self.failed and self.adapter.getPosition()[0] > installed_x - controls.REMOVAL_X_MARGIN:
+                    self._fail(f"removal FAILED: adapter stayed near {point_id}; calibrate installed pickup pose or grip width")
 
     def _command_joints(self, second):
         """沿預先計算的關節路徑線性內插；失敗後固定在當前姿態。"""

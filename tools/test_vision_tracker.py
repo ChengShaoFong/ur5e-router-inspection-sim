@@ -67,6 +67,19 @@ class FakeRobot:
 
 
 class VisionTrackerTest(unittest.TestCase):
+    def test_switch_point_clears_old_detection(self):
+        robot = FakeRobot()
+        tracker = PortVisionTracker(
+            robot, 18.5, 20.0,
+            detector=lambda *_: (-0.08, 0.30, (109, 78, 209, 160), 1.0),
+        )
+        tracker.set_target("port_b", 78.5, 80.0)
+        for second in (78.5, 78.65, 78.8, 78.95, 79.1):
+            tracker.sample(second)
+        self.assertAlmostEqual(tracker.recent(79.1).y, -0.08)
+        tracker.set_target("port_a", 18.5, 20.0)
+        self.assertIsNone(tracker.recent(79.1))
+
     def test_stable_frames_allow_recent_result_and_respect_capture_window(self):
         robot = FakeRobot()
         calls = []

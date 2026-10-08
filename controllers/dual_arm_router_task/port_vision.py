@@ -2,7 +2,7 @@
 
 from collections import deque
 
-import vision_config as config
+from settings import port_vision as config
 from vision_geometry import intersect_x_plane, world_ray_from_pixel
 
 # 保留既有匯入介面，供離線測試與其他工具使用。

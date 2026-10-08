@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
-import vision_config as config
-from plan import PORT
+from settings import port_vision as config
+from plan import POINTS, RUN_ORDER
 from port_vision import locate_port
 
 
@@ -30,6 +30,7 @@ class PortVisionTracker:
         self.detector = detector
         self.capture_start = capture_start
         self.capture_end = capture_end
+        self.point_id = RUN_ORDER[0]
         self.camera_node = robot.getFromDevice(self.camera._tag)
         self.router_node = robot.getFromDef("ROUTER")
         if self.router_node is None:
@@ -37,6 +38,16 @@ class PortVisionTracker:
         self.display = robot.getDevice("port_a_vision_display")
         self.display.attachCamera(self.camera)
         self.history = deque(maxlen=config.STABLE_FRAMES)
+        self.latest = None
+        self.last_sample_time = -1.0
+        self._draw_overlay()
+
+    def set_target(self, point_id, capture_start, capture_end):
+        """切換拍攝點位，清除前一站的定位結果。"""
+        self.point_id = point_id
+        self.capture_start = capture_start
+        self.capture_end = capture_end
+        self.history.clear()
         self.latest = None
         self.last_sample_time = -1.0
         self._draw_overlay()
@@ -82,14 +93,14 @@ class PortVisionTracker:
         """儲存未畫框的原始相機影像，供現場調整 AOI 與門檻。"""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        self.camera.saveImage(str(directory / "port_a_capture.png"), 100)
+        self.camera.saveImage(str(directory / f"{self.point_id}_capture.png"), 100)
 
     def _valid_detection(self, y, z, confidence):
         """排除低信心、非有限值或遠離預定插孔的誤判。"""
         return (math.isfinite(y) and math.isfinite(z)
                 and confidence >= config.MIN_CONFIDENCE
-                and abs(y - PORT[1]) < config.MAX_NOMINAL_ERROR
-                and abs(z - PORT[2]) < config.MAX_NOMINAL_ERROR)
+                and abs(y - POINTS[self.point_id][1]) < config.MAX_NOMINAL_ERROR
+                and abs(z - POINTS[self.point_id][2]) < config.MAX_NOMINAL_ERROR)
 
     def _draw_overlay(self):
         """清除前一張標記，再於相機畫面顯示綠色 AOI。"""

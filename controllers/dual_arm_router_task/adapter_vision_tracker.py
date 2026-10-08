@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
-import adapter_vision_config as config
+from settings import adapter_vision as config
 from adapter_vision import locate_adapter
-from plan import PORT
+from plan import POINTS, RUN_ORDER
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,18 @@ class AdapterVisionTracker:
         self.detector = detector
         self.capture_start = capture_start
         self.capture_end = capture_end
+        self.point_id = RUN_ORDER[0]
         self.history = deque(maxlen=config.STABLE_FRAMES)
+        self.latest = None
+        self.last_sample_time = -1.0
+        self._draw_overlay()
+
+    def set_target(self, point_id, capture_start, capture_end):
+        """開始新點位的追蹤，避免沿用上一站的影像。"""
+        self.point_id = point_id
+        self.capture_start = capture_start
+        self.capture_end = capture_end
+        self.history.clear()
         self.latest = None
         self.last_sample_time = -1.0
         self._draw_overlay()
@@ -76,15 +87,15 @@ class AdapterVisionTracker:
         """儲存原始相機影像，方便檢查橘色外框與 AOI。"""
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        self.camera.saveImage(str(directory / "adapter_socket_capture.png"), 100)
+        self.camera.saveImage(str(directory / f"{self.point_id}_adapter_socket_capture.png"), 100)
 
     def _valid_detection(self, x, y, z, confidence):
         """排除非有限值、低信心及超出工作區的外框。"""
         return (all(math.isfinite(value) for value in (x, y, z))
                 and confidence >= config.MIN_CONFIDENCE
-                and abs(x - PORT[0]) < config.MAX_NOMINAL_X_ERROR
-                and abs(y - PORT[1]) < config.MAX_NOMINAL_Y_ERROR
-                and abs(z - PORT[2]) < config.MAX_NOMINAL_Z_ERROR)
+                and abs(x - POINTS[self.point_id][0]) < config.MAX_NOMINAL_X_ERROR
+                and abs(y - POINTS[self.point_id][1]) < config.MAX_NOMINAL_Y_ERROR
+                and abs(z - POINTS[self.point_id][2]) < config.MAX_NOMINAL_Z_ERROR)
 
     def _draw_overlay(self):
         """清除上一張標記，重新畫出綠色搜尋區域。"""

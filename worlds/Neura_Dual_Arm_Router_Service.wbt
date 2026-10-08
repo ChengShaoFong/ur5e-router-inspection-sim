@@ -231,6 +231,18 @@ DEF ROUTER Robot {
       numberOfRotations 0
       snap FALSE
     }
+    DEF PORT_B_LATCH Connector {
+      translation -0.095 -0.08 0.02
+      rotation 0 0 1 3.14159265
+      name "port_b_latch"
+      model "router_adapter_port"
+      type "active"
+      autoLock TRUE
+      distanceTolerance 0.012
+      axisTolerance 0.5
+      numberOfRotations 0
+      snap FALSE
+    }
     Shape {
       appearance DEF RouterCase PBRAppearance {
         baseColor 0.09 0.12 0.16

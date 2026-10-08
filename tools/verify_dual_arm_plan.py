@@ -6,10 +6,14 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "controllers" / "dual_arm_router_task"))
-from adapter_vision_config import AOI as ADAPTER_AOI, CAMERA_FOV as ADAPTER_FOV  # noqa: E402
-from adapter_vision_config import CAMERA_HEIGHT as ADAPTER_HEIGHT, CAMERA_WIDTH as ADAPTER_WIDTH  # noqa: E402
-from adapter_vision_config import CAMERA_TOOL_TRANSLATION, CAMERA_TOOL_Y_ROTATION  # noqa: E402
-from adapter_vision_config import REAR_FACE_TO_ORIGIN_X  # noqa: E402
+from settings import adapter_vision as adapter_config  # noqa: E402
+ADAPTER_AOI = adapter_config.AOI
+ADAPTER_FOV = adapter_config.CAMERA_FOV
+ADAPTER_HEIGHT = adapter_config.CAMERA_HEIGHT
+ADAPTER_WIDTH = adapter_config.CAMERA_WIDTH
+CAMERA_TOOL_TRANSLATION = adapter_config.CAMERA_TOOL_TRANSLATION
+CAMERA_TOOL_Y_ROTATION = adapter_config.CAMERA_TOOL_Y_ROTATION
+REAR_FACE_TO_ORIGIN_X = adapter_config.REAR_FACE_TO_ORIGIN_X
 from kinematics import TIP_OFFSET, forward_kinematics, rotation  # noqa: E402
 from plan import ARM1, ARM2, ARM_BASES, PORT, joint_trajectory  # noqa: E402
 from vision_geometry import focal_pixels  # noqa: E402

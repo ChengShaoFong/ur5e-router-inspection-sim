@@ -2,7 +2,7 @@
 
 from collections import deque
 
-import adapter_vision_config as config
+from settings import adapter_vision as config
 from vision_geometry import focal_pixels, world_ray_from_pixel
 
 

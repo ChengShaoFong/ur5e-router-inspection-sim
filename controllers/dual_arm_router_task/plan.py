@@ -1,12 +1,11 @@
 """雙手臂的時間表與關節軌跡；修改動作位置或秒數時從此檔開始。"""
 
-from dataclasses import dataclass
-import json
+from dataclasses import dataclass, replace
 import math
-from pathlib import Path
 from enum import Enum
 
 from kinematics import HORIZONTAL, HORIZONTAL_ROLLED, TOP_DOWN, horizontal_roll, interpolate_orientation, solve_pose
+from settings import calibration, task
 
 
 ARM_BASES = {"arm1": (0.0, 0.35, 0.0), "arm2": (0.0, -0.35, 0.0)}
@@ -15,12 +14,18 @@ HOME = (0.0, -1.246, 1.685, 0.208, 0.0, 0.153)
 HOMES = {"arm1": HOME, "arm2": (0.0, -1.7, 1.6, 0.0, 0.0, 0.0)}
 FLOOR = (0.34, 0.33, 0.030)
 PORT = (0.60, 0.08, 0.30)
-CALIBRATION = json.loads(Path(__file__).with_name("calibration.json").read_text(encoding="utf-8"))
-PICKUP_TIP = tuple(CALIBRATION["pickup_tip"])
-INSTALLED_TIP = tuple(CALIBRATION["installed_tip"])
-INSERTION_TIP = tuple(CALIBRATION["insertion_tip"])
-PLACE_TIP = tuple(CALIBRATION["place_tip"])
-CLOSED_ANGLE = max(0.0, min(float(CALIBRATION["closed_angle"]), 0.7))
+POINTS = {name.lower(): tuple(map(float, xyz)) for name, xyz in vars(task).items()
+          if name != "RUN_ORDER"}
+RUN_ORDER = tuple(task.RUN_ORDER)
+if not RUN_ORDER or len(set(RUN_ORDER)) != len(RUN_ORDER) or any(name not in POINTS for name in RUN_ORDER):
+    raise ValueError("task.ini: run_order must contain unique names from [task]")
+if any(len(xyz) != 3 or not all(math.isfinite(value) for value in xyz) for xyz in POINTS.values()):
+    raise ValueError("task.ini: each point needs three finite coordinates")
+PICKUP_TIP = tuple(calibration.PICKUP_TIP)
+INSTALLED_TIP = tuple(calibration.INSTALLED_TIP)
+INSERTION_TIP = tuple(calibration.INSERTION_TIP)
+PLACE_TIP = tuple(calibration.PLACE_TIP)
+CLOSED_ANGLE = max(0.0, min(float(calibration.CLOSED_ANGLE), 0.7))
 
 
 class CueEvent(str, Enum):
@@ -50,9 +55,10 @@ class Cue:
     orientation: tuple | None = None
     grip: float | None = None
     event: CueEvent | None = None
+    point_id: str | None = None
 
 
-ARM1 = (
+_ARM1_TEMPLATE = (
     Cue(0, "home", grip=0.0, event=CueEvent.HOME),
     Cue(2, "approach adapter", (PICKUP_TIP[0], PICKUP_TIP[1], PICKUP_TIP[2] + 0.218), TOP_DOWN),
     Cue(6, "lower fingers around adapter", PICKUP_TIP, TOP_DOWN),
@@ -78,7 +84,7 @@ ARM1 = (
     Cue(84, "return home", event=CueEvent.HOME),
 )
 
-ARM2 = (
+_ARM2_TEMPLATE = (
     Cue(0, "home", event=CueEvent.HOME),
     Cue(34, "wait for arm 1 to clear port", event=CueEvent.ARM1_CLEAR_PORT),
     Cue(36, "approach adapter socket", (0.42, 0.08, 0.30), HORIZONTAL, event=CueEvent.APPROACH_SOCKET),
@@ -87,6 +93,42 @@ ARM2 = (
     Cue(50, "withdraw cleaning head", (0.42, 0.08, 0.30), HORIZONTAL_ROLLED, event=CueEvent.WITHDRAW_CLEANER),
     Cue(54, "return home", event=CueEvent.HOME),
 )
+
+
+def point_tip(tip, point_id):
+    """把 Port A 校正後的工具目標平移到指定點位。"""
+    return tuple(value + center - origin for value, center, origin in zip(tip, POINTS[point_id], PORT))
+
+
+def build_schedule(run_order=RUN_ORDER):
+    """依點位順序產生雙臂流程；中間點位直接夾著插座移往下一站。"""
+    if not run_order or len(set(run_order)) != len(run_order) or any(name not in POINTS for name in run_order):
+        raise ValueError("run_order must contain unique configured point names")
+
+    arm1 = [cue for cue in _ARM1_TEMPLATE if cue.second < 15]  # 地面取件只執行一次。
+    arm2 = [_ARM2_TEMPLATE[0]]
+    for index, point_id in enumerate(run_order):
+        delay = index * 60.0
+        for cue in _ARM1_TEMPLATE:
+            if not 15 <= cue.second <= 70:
+                continue
+            arm1.append(replace_cue(cue, delay, point_id))
+        for cue in _ARM2_TEMPLATE[1:]:
+            arm2.append(replace_cue(cue, delay, point_id))
+    last_delay = (len(run_order) - 1) * 60.0
+    arm1.extend(replace_cue(cue, last_delay) for cue in _ARM1_TEMPLATE if cue.second > 70)
+    return tuple(arm1), tuple(arm2)
+
+
+def replace_cue(cue, delay, point_id=None):
+    """複製範本動作，更新時間、點位及工具座標。"""
+    return replace(cue, second=cue.second + delay,
+                   tip=point_tip(cue.tip, point_id) if cue.tip is not None and point_id else cue.tip,
+                   label=cue.label.replace("port A", f"port {point_id.removeprefix('port_').upper()}") if point_id else cue.label,
+                   point_id=point_id)
+
+
+ARM1, ARM2 = build_schedule()
 
 def joint_trajectory(role, cues, sample_seconds=0.25):
     """將笛卡兒目標內插成關節路徑，讓夾爪平順搬運物件。"""
