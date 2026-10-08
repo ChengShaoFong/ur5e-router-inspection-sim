@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "controllers" / "du
 from adapter_vision import locate_adapter  # noqa: E402
 from settings import adapter_vision as config  # noqa: E402
 CAMERA_WIDTH, CAMERA_HEIGHT = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
-from adapter_vision_tracker import AdapterVisionTracker  # noqa: E402
+from vision_tracker import AdapterVisionTracker  # noqa: E402
 
 
 def framed_image(left, top, right, bottom):

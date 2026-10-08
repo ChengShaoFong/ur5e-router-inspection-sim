@@ -15,7 +15,7 @@ CAMERA_TOOL_TRANSLATION = adapter_config.CAMERA_TOOL_TRANSLATION
 CAMERA_TOOL_Y_ROTATION = adapter_config.CAMERA_TOOL_Y_ROTATION
 REAR_FACE_TO_ORIGIN_X = adapter_config.REAR_FACE_TO_ORIGIN_X
 from kinematics import TIP_OFFSET, forward_kinematics, rotation  # noqa: E402
-from plan import ARM1, ARM2, ARM_BASES, PORT, joint_trajectory  # noqa: E402
+from plan import ARM1, ARM2, ARM_BASES, POINTS, RUN_ORDER, CueEvent, joint_trajectory  # noqa: E402
 from vision_geometry import focal_pixels  # noqa: E402
 
 
@@ -29,7 +29,7 @@ def tool_tip(role, joints):
     )
 
 
-def adapter_pixel_from_arm2(joints):
+def adapter_pixel_from_arm2(joints, point_id):
     """將標稱插座後端面投影到手臂二相機畫面。"""
     frame = forward_kinematics(joints)
     tool_rotation = [row[:3] for row in frame[:3]]
@@ -43,7 +43,8 @@ def adapter_pixel_from_arm2(joints):
         + sum(tool_rotation[row][k] * CAMERA_TOOL_TRANSLATION[k] for k in range(3))
         for row in range(3)
     ]
-    rear_face = (PORT[0] - REAR_FACE_TO_ORIGIN_X, PORT[1], PORT[2])
+    target = POINTS[point_id]
+    rear_face = (target[0] - REAR_FACE_TO_ORIGIN_X, target[1], target[2])
     delta = [rear_face[row] - position[row] for row in range(3)]
     camera_ray = [sum(orientation[row][axis] * delta[row] for row in range(3)) for axis in range(3)]
     focal = focal_pixels(ADAPTER_WIDTH, ADAPTER_FOV)
@@ -52,10 +53,12 @@ def adapter_pixel_from_arm2(joints):
 
 
 def verify():
-    arm1_home = next(c.second for c in ARM1 if c.label == "return home")
-    arm2_start = next(c.second for c in ARM2 if c.label == "approach adapter socket")
-    arm1_retake = next(c.second for c in ARM1 if c.label == "approach installed adapter")
-    assert arm1_home < arm2_start < ARM2[-1].second < arm1_retake
+    for point_id in RUN_ORDER:
+        arm1_home = next(c.second for c in ARM1 if c.point_id == point_id and c.event == CueEvent.HOME)
+        arm2_start = next(c.second for c in ARM2 if c.point_id == point_id and c.event == CueEvent.APPROACH_SOCKET)
+        arm2_home = next(c.second for c in ARM2 if c.point_id == point_id and c.event == CueEvent.HOME)
+        arm1_retake = next(c.second for c in ARM1 if c.point_id == point_id and c.label == "approach installed adapter")
+        assert arm1_home < arm2_start < arm2_home < arm1_retake
 
     for role, cues in (("arm1", ARM1), ("arm2", ARM2)):
         points = joint_trajectory(role, cues)
@@ -70,18 +73,21 @@ def verify():
             # 20 cm 的清潔頭在待命位置必須離開地板。
             assert tool_tip(role, points[0][1])[2] > 0.25
             assert tool_tip(role, points[-1][1])[2] > 0.25
-            for second in (36, 41):
-                pixel_x, pixel_y = adapter_pixel_from_arm2(dict(points)[second])
-                assert ADAPTER_AOI[0] < pixel_x < ADAPTER_AOI[2]
-                assert ADAPTER_AOI[1] < pixel_y < ADAPTER_AOI[3]
+            for point_id in RUN_ORDER:
+                for cue in (c for c in cues if c.point_id == point_id and c.event in
+                            (CueEvent.APPROACH_SOCKET, CueEvent.INSERT_CLEANER)):
+                    pixel_x, pixel_y = adapter_pixel_from_arm2(dict(points)[cue.second], point_id)
+                    assert ADAPTER_AOI[0] < pixel_x < ADAPTER_AOI[2]
+                    assert ADAPTER_AOI[1] < pixel_y < ADAPTER_AOI[3]
         assert all(a[0] < b[0] for a, b in zip(points, points[1:]))
         by_time = {round(second, 6): joints for second, joints in points}
         if role == "arm1":
-            front = next(c.second for c in cues if c.label == "stop in front of port A")
-            capture = next(c.second for c in cues if c.label == "capture and locate port A")
-            insert = next(c.second for c in cues if c.label == "insert adapter in port A")
-            assert front < capture < insert
-            assert by_time[front] == by_time[capture]
+            for point_id in RUN_ORDER:
+                front = next(c.second for c in cues if c.point_id == point_id and c.event == CueEvent.STOP_IN_FRONT)
+                capture = next(c.second for c in cues if c.point_id == point_id and c.event == CueEvent.CAPTURE_PORT)
+                insert = next(c.second for c in cues if c.point_id == point_id and c.event == CueEvent.INSERT_ADAPTER)
+                assert front < capture < insert
+                assert by_time[front] == by_time[capture]
             # Closing the fingers must not start the lift trajectory.
             close = next(c.second for c in cues if c.label == "close gripper on adapter")
             hold = next(c.second for c in cues if c.label == "hold while fingers close")

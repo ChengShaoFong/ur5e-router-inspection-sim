@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "controllers" / "du
 sys.modules.setdefault("controller", types.SimpleNamespace(Supervisor=object))
 import dual_arm_router_task as task_module  # noqa: E402
 from kinematics import JOINT_NAMES  # noqa: E402
+from kinematics import HORIZONTAL  # noqa: E402
 from plan import POINTS, CueEvent, build_schedule, joint_trajectory  # noqa: E402
 from test_task_startup import FakeRobot  # noqa: E402
 from vision_tracker import LocalizedPort  # noqa: E402
@@ -21,15 +22,22 @@ class MultiPointPlanTest(unittest.TestCase):
         removals = [cue for cue in arm1 if cue.event == CueEvent.REMOVE_ADAPTER]
         captures = [cue for cue in arm1 if cue.event == CueEvent.CAPTURE_PORT]
         cleaner_inserts = [cue for cue in arm2 if cue.event == CueEvent.INSERT_CLEANER]
+        socket_captures = [cue for cue in arm2 if cue.event == CueEvent.CAPTURE_SOCKET]
         self.assertEqual([(cue.point_id, cue.second) for cue in removals],
-                         [("port_a", 70), ("port_b", 130)])
+                         [("port_a", 70), ("port_b", 140)])
         self.assertEqual([(cue.point_id, cue.second) for cue in captures],
                          [("port_a", 20), ("port_b", 80)])
         self.assertEqual([cue.second for cue in cleaner_inserts], [41, 101])
+        self.assertEqual([cue.second for cue in socket_captures], [38, 98])
+        self.assertEqual([cue.tip for cue in socket_captures],
+                         [next(cue.tip for cue in arm2 if cue.point_id == point_id
+                               and cue.event == CueEvent.APPROACH_SOCKET)
+                          for point_id in ("port_a", "port_b")])
+        self.assertTrue(all(cue.orientation == HORIZONTAL for cue in socket_captures))
         between = [cue for cue in arm1 if 70 < cue.second < 82]
         self.assertTrue(any(cue.point_id == "port_b" and cue.tip for cue in between))
         self.assertFalse(any(cue.grip == 0 or cue.event == CueEvent.HOME for cue in between))
-        self.assertEqual(arm1[-1].second, 144)
+        self.assertEqual(arm1[-1].second, 154)
         self.assertEqual(next(cue.tip for cue in arm1 if cue.point_id == "port_b"
                               and cue.event == CueEvent.INSERT_ADAPTER), POINTS["port_b"])
         for role, cues in (("arm1", arm1), ("arm2", arm2)):

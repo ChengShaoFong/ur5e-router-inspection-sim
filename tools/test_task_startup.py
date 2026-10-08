@@ -9,10 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "controllers" / "dual_arm_router_task"))
 sys.modules.setdefault("controller", types.SimpleNamespace(Supervisor=object))
 from dual_arm_router_task import DualArmTask, corrected_insertion_tip, measured_tool_tip  # noqa: E402
-from adapter_vision_tracker import LocalizedAdapter  # noqa: E402
 from kinematics import JOINT_NAMES  # noqa: E402
 from plan import CueEvent  # noqa: E402
-from vision_tracker import LocalizedPort  # noqa: E402
+from vision_tracker import LocalizedAdapter, LocalizedPort  # noqa: E402
 
 
 class FakeDevice:

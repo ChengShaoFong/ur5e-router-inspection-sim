@@ -40,6 +40,7 @@ class CueEvent(str, Enum):
     REMOVE_ADAPTER = "remove_adapter"
     ARM1_CLEAR_PORT = "arm1_clear_port"
     APPROACH_SOCKET = "approach_socket"
+    CAPTURE_SOCKET = "capture_socket"
     INSERT_CLEANER = "insert_cleaner"
     ROTATE_CLEANER = "rotate_cleaner"
     WITHDRAW_CLEANER = "withdraw_cleaner"
@@ -88,6 +89,7 @@ _ARM2_TEMPLATE = (
     Cue(0, "home", event=CueEvent.HOME),
     Cue(34, "wait for arm 1 to clear port", event=CueEvent.ARM1_CLEAR_PORT),
     Cue(36, "approach adapter socket", (0.42, 0.08, 0.30), HORIZONTAL, event=CueEvent.APPROACH_SOCKET),
+    Cue(38, "capture and locate adapter socket", (0.42, 0.08, 0.30), HORIZONTAL, event=CueEvent.CAPTURE_SOCKET),
     Cue(41, "insert cleaning head", (0.585, 0.08, 0.30), HORIZONTAL, event=CueEvent.INSERT_CLEANER),
     *(Cue(41 + step * 0.5, f"rotate cleaning head {step * 18} degrees", (0.585, 0.08, 0.30), horizontal_roll(math.radians(step * 18)), event=CueEvent.ROTATE_CLEANER) for step in range(1, 11)),
     Cue(50, "withdraw cleaning head", (0.42, 0.08, 0.30), HORIZONTAL_ROLLED, event=CueEvent.WITHDRAW_CLEANER),
@@ -107,15 +109,25 @@ def build_schedule(run_order=RUN_ORDER):
 
     arm1 = [cue for cue in _ARM1_TEMPLATE if cue.second < 15]  # 地面取件只執行一次。
     arm2 = [_ARM2_TEMPLATE[0]]
-    for index, point_id in enumerate(run_order):
-        delay = index * 60.0
+    delay = 0.0
+    for point_id in run_order:
+        # B 點位直接旋轉會經過腕部奇異區；保持相機水平，延長清潔頭旋轉時間。
+        rotation_scale = 3.0 if point_id == "port_b" else 1.0
+        recovery = math.ceil((rotation_scale - 1) * 5)
         for cue in _ARM1_TEMPLATE:
             if not 15 <= cue.second <= 70:
                 continue
-            arm1.append(replace_cue(cue, delay, point_id))
+            arm1.append(replace_cue(cue, delay + (recovery if cue.second >= 55 else 0), point_id))
         for cue in _ARM2_TEMPLATE[1:]:
-            arm2.append(replace_cue(cue, delay, point_id))
-    last_delay = (len(run_order) - 1) * 60.0
+            if cue.event == CueEvent.ROTATE_CLEANER:
+                cue_delay = delay + (cue.second - 41) * (rotation_scale - 1)
+            elif cue.event in (CueEvent.WITHDRAW_CLEANER, CueEvent.HOME):
+                cue_delay = delay + 5 * (rotation_scale - 1)
+            else:
+                cue_delay = delay
+            arm2.append(replace_cue(cue, cue_delay, point_id))
+        last_delay = delay + recovery
+        delay += 60 + recovery
     arm1.extend(replace_cue(cue, last_delay) for cue in _ARM1_TEMPLATE if cue.second > 70)
     return tuple(arm1), tuple(arm2)
 

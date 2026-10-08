@@ -9,13 +9,12 @@ from pathlib import Path
 from controller import Supervisor
 
 from settings import adapter_vision as adapter_config, control as controls, port_vision as port_config
-from adapter_vision_tracker import AdapterVisionTracker
 from kinematics import JOINT_NAMES, TIP_OFFSET, forward_kinematics
 from plan import (
     ARM1, ARM2, ARM_BASES, CLOSED_ANGLE, INSERTION_TIP, INSTALLED_TIP,
     PLACE_TIP, PORT, POINTS, RUN_ORDER, CueEvent, joint_trajectory,
 )
-from vision_tracker import PortVisionTracker
+from vision_tracker import AdapterVisionTracker, PortVisionTracker
 
 
 GRIPPER_MOTORS = (
@@ -108,7 +107,8 @@ class DualArmTask:
             self.vision = PortVisionTracker(robot, capture_start, capture_end)
         else:
             capture_start = event_time(self.cues, CueEvent.ARM1_CLEAR_PORT) + adapter_config.SETTLE_SECONDS
-            self.adapter_vision = AdapterVisionTracker(robot, capture_start, self.cleaner_insert_time)
+            capture_end = event_time(self.cues, CueEvent.CAPTURE_SOCKET, self.active_point_id)
+            self.adapter_vision = AdapterVisionTracker(robot, capture_start, capture_end)
 
         self.applied_adapter_pose = POINTS[self.active_point_id]
         self.last_adapter_replan_time = float("-inf")
@@ -167,9 +167,12 @@ class DualArmTask:
                 self.cleaner_insert_time = event_time(self.cues, CueEvent.INSERT_CLEANER, cue.point_id)
                 self.applied_adapter_pose = POINTS[cue.point_id]
                 self.adapter_vision.set_target(cue.point_id, cue.second + adapter_config.SETTLE_SECONDS,
-                                               self.cleaner_insert_time)
+                                               event_time(self.cues, CueEvent.CAPTURE_SOCKET, cue.point_id))
             elif cue.event == CueEvent.CAPTURE_PORT and not self.failed:
                 self._capture_and_align(second)
+            elif cue.event == CueEvent.CAPTURE_SOCKET and not self.failed:
+                self.adapter_vision.save_capture(self.capture_dir)
+                self._verify_cleaner_alignment(second, max_age=1.0)
             elif cue.event == CueEvent.INSERT_CLEANER and not self.failed:
                 self._verify_cleaner_alignment(second)
             if self.failed:
@@ -256,9 +259,9 @@ class DualArmTask:
                 or second - self.last_adapter_replan_time < adapter_config.MIN_REPLAN_INTERVAL):
             return
         delta = tuple(a - b for a, b in zip(observed, POINTS[self.active_point_id]))
+        # 拍照點保持不動，視覺修正只作用於拍照後的清潔路徑。
         shifted_events = {
-            CueEvent.APPROACH_SOCKET, CueEvent.INSERT_CLEANER,
-            CueEvent.ROTATE_CLEANER, CueEvent.WITHDRAW_CLEANER,
+            CueEvent.INSERT_CLEANER, CueEvent.ROTATE_CLEANER, CueEvent.WITHDRAW_CLEANER,
         }
         updated = tuple(
             replace(cue, tip=tuple(value + shift for value, shift in zip(base.tip, delta)))
@@ -277,11 +280,14 @@ class DualArmTask:
         self.last_adapter_replan_time = second
         self._print(f"adapter camera x/y/z={tuple(round(x, 4) for x in observed)}; cleaning path updated")
 
-    def _verify_cleaner_alignment(self, second):
-        """插入清潔頭前確認相機仍看得到近期插座位置。"""
-        self.adapter_vision.save_capture(self.capture_dir)
-        if self.adapter_vision.recent(second) is None:
-            self._fail("cleaning SKIPPED: arm 2 camera did not localize adapter socket")
+    def _verify_cleaner_alignment(self, second, max_age=None):
+        """拍照停靠及插入前確認插座定位仍有效。"""
+        detection = self.adapter_vision.recent(second)
+        if detection is None or (max_age is not None and second - detection.time > max_age):
+            self._fail(f"cleaning SKIPPED: arm 2 camera did not localize {self.active_point_id} adapter socket")
+        elif max_age is not None:
+            self._print(f"{self.active_point_id} socket located at "
+                        f"{tuple(round(value, 4) for value in (detection.x, detection.y, detection.z))}")
 
     def _check_milestones(self, second):
         """在抬起、安裝與拔出後確認物件已到預期區域。"""
