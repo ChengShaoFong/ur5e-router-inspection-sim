@@ -6,7 +6,7 @@ https://github.com/user-attachments/assets/23b2402d-593f-4822-a061-e1f9c1d7581a
 
 用 Webots 開啟 `worlds/Neura_Dual_Arm_Router_Service.wbt`，按執行即可。任務會由手臂一取起插座、裝入指定插孔，手臂二定位並清潔插座，最後由手臂一拆下。多個點位會依順序執行；中間不會把插座放回地面。
 
-## 平常只改 `task.ini`
+## Manual adjustment `task.ini`
 
 | 區段 | 用途 |
 | --- | --- |
