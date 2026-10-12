@@ -1,0 +1,46 @@
+0.03 home adapter=(0.34, 0.33, 0.02) grasp_presence=0
+2.02 approach adapter adapter=(0.34, 0.33, 0.0215) grasp_presence=0
+6.02 lower gripper adapter=(0.34, 0.33, 0.0215) grasp_presence=1
+8.00 grasp adapter adapter=(0.34, 0.33, 0.0215) grasp_presence=1
+10.02 lift adapter adapter=(0.3401, 0.3282, 0.2551) grasp_presence=1
+14.02 carry to router adapter=(0.4274, 0.0846, 0.3927) grasp_presence=1
+18.02 align with port A adapter=(0.5131, 0.0789, 0.3014) grasp_presence=1
+22.02 insert adapter in port A adapter=(0.5896, 0.0794, 0.2968) grasp_presence=1
+24.00 release adapter adapter=(0.5898, 0.0794, 0.2969) grasp_presence=1
+27.01 clear port adapter=(0.5896, 0.0794, 0.2968) grasp_presence=0
+31.01 return home adapter=(0.5896, 0.0794, 0.2968) grasp_presence=0
+55.01 wait for cleaning arm adapter=(0.5889, 0.0791, 0.2964) grasp_presence=0
+58.02 approach installed adapter adapter=(0.5889, 0.0791, 0.2965) grasp_presence=0
+62.02 reach adapter adapter=(0.589, 0.0791, 0.2965) grasp_presence=1
+64.00 grasp installed adapter adapter=(0.589, 0.0792, 0.2965) grasp_presence=1
+64.00 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+64.26 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+64.51 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+64.77 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+65.02 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+65.28 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+65.50 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+65.76 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+66.02 wait for port unlock adapter=(0.589, 0.0792, 0.2965) grasp_presence=1
+66.02 transfer gap=0.0112 locked=True presence=1 adapter=(0.589, 0.0792, 0.2965)
+66.27 transfer gap=0.0113 locked=True presence=1 adapter=(0.6055, 0.0661, 0.2805)
+66.53 transfer gap=0.0113 locked=True presence=1 adapter=(0.6145, 0.0556, 0.2733)
+66.75 transfer gap=0.0113 locked=True presence=1 adapter=(0.618, 0.0488, 0.2778)
+67.01 transfer gap=0.0113 locked=True presence=1 adapter=(0.6215, 0.0411, 0.2832)
+67.26 transfer gap=0.0113 locked=True presence=1 adapter=(0.6244, 0.0341, 0.2881)
+67.52 transfer gap=0.0113 locked=True presence=1 adapter=(0.6282, 0.0253, 0.2945)
+67.78 transfer gap=0.0113 locked=True presence=1 adapter=(0.6304, 0.018, 0.3012)
+68.00 transfer gap=0.0113 locked=True presence=1 adapter=(0.6317, 0.0117, 0.3074)
+68.26 transfer gap=0.0113 locked=True presence=1 adapter=(0.632, 0.0047, 0.3163)
+68.51 transfer gap=0.0113 locked=True presence=1 adapter=(0.6293, -0.0008, 0.3308)
+68.77 transfer gap=0.0113 locked=True presence=1 adapter=(0.6221, -0.0038, 0.3455)
+69.02 transfer gap=0.0113 locked=True presence=1 adapter=(0.6149, -0.0066, 0.3579)
+69.28 transfer gap=0.0113 locked=True presence=1 adapter=(0.6115, -0.0124, 0.3669)
+69.50 transfer gap=0.0112 locked=True presence=1 adapter=(0.6093, -0.0166, 0.3725)
+69.76 transfer gap=0.0112 locked=True presence=1 adapter=(0.6055, -0.0178, 0.377)
+70.02 remove adapter from router adapter=(0.6012, -0.0294, 0.389) grasp_presence=1
+74.02 carry adapter to floor adapter=(0.356, 0.3147, 0.2088) grasp_presence=1
+78.02 place adapter on floor adapter=(0.3311, 0.3299, 0.0248) grasp_presence=1
+80.00 release adapter on floor adapter=(0.331, 0.3299, 0.021) grasp_presence=1
+84.00 return home adapter=(0.331, 0.3299, 0.0211) grasp_presence=0
+86.02 complete; final joint error=0.0001 rad; joints=(0.0, -1.0, 1.8, 0.0, 0.0, 0.0); adapter=(0.331, 0.3299, 0.0211)
