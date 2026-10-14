@@ -20,11 +20,14 @@ class MultiPointPlanTest(unittest.TestCase):
     def test_two_points_transfer_without_floor_place_between_them(self):
         arm1, arm2 = build_schedule(("port_a", "port_b"))
         removals = [cue for cue in arm1 if cue.event == CueEvent.REMOVE_ADAPTER]
+        grip_checks = [cue for cue in arm1 if cue.event == CueEvent.CHECK_GRASP]
         captures = [cue for cue in arm1 if cue.event == CueEvent.CAPTURE_PORT]
         cleaner_inserts = [cue for cue in arm2 if cue.event == CueEvent.INSERT_CLEANER]
         socket_captures = [cue for cue in arm2 if cue.event == CueEvent.CAPTURE_SOCKET]
         self.assertEqual([(cue.point_id, cue.second) for cue in removals],
                          [("port_a", 70), ("port_b", 140)])
+        self.assertEqual([(cue.point_id, cue.second) for cue in grip_checks],
+                         [(None, 10), ("port_a", 66), ("port_b", 136)])
         self.assertEqual([(cue.point_id, cue.second) for cue in captures],
                          [("port_a", 20), ("port_b", 80)])
         self.assertEqual([cue.second for cue in cleaner_inserts], [41, 101])

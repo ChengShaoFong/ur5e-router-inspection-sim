@@ -98,7 +98,7 @@ def verify():
             midpoint = round((hold + lift) / 2, 6)
             assert tool_tip(role, by_time[midpoint])[2] > tool_tip(role, by_time[hold])[2] + 0.05
             installed_close = next(c.second for c in cues if c.label == "close gripper on installed adapter")
-            unlock = next(c.second for c in cues if c.label == "wait for port unlock")
+            unlock = next(c.second for c in cues if c.label == "verify grip and wait for port unlock")
             assert math.dist(tool_tip(role, by_time[installed_close]), tool_tip(role, by_time[unlock])) < 0.001
         for cue in cues:
             if cue.tip is not None:

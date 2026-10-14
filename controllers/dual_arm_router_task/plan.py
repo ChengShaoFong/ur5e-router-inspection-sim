@@ -77,7 +77,7 @@ _ARM1_TEMPLATE = (
     Cue(58, "approach installed adapter", (0.43, 0.08, 0.300), TOP_DOWN),
     Cue(62, "reach adapter", INSTALLED_TIP, TOP_DOWN),
     Cue(64, "close gripper on installed adapter", grip=CLOSED_ANGLE),
-    Cue(66, "wait for port unlock"),
+    Cue(66, "verify grip and wait for port unlock", event=CueEvent.CHECK_GRASP),
     Cue(70, "remove adapter from router", (0.455, 0.08, 0.300), TOP_DOWN, event=CueEvent.REMOVE_ADAPTER),
     Cue(74, "carry adapter to floor", (0.34, 0.33, 0.24), TOP_DOWN),
     Cue(78, "place adapter on floor", PLACE_TIP, TOP_DOWN),

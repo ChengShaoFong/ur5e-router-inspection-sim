@@ -1,3 +1,6 @@
 24.00 port_a insert presence=1 locked=True
 54.02 port_a clean presence=1 locked=True
 66.02 port_a unlock presence=1 locked=True
+84.00 port_b insert presence=1 locked=True
+124.00 port_b clean presence=1 locked=True
+136.00 port_b unlock presence=1 locked=True
