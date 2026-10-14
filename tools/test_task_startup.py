@@ -33,6 +33,27 @@ class FakeDevice:
     def getValue(self):
         return self.value
 
+    def getValues(self):
+        return (0.0, 0.0, 0.0)
+
+    def getWidth(self):
+        return 560
+
+    def getHeight(self):
+        return 250
+
+    def setFont(self, *args):
+        pass
+
+    def drawText(self, *args):
+        pass
+
+    def drawLine(self, *args):
+        pass
+
+    def drawPixel(self, *args):
+        pass
+
     def attachCamera(self, camera):
         self.camera = camera
 

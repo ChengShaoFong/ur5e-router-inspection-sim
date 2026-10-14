@@ -47,9 +47,16 @@ DEF ARM_1 UR5e {
   supervisor TRUE
   selfCollision FALSE
   toolSlot [
-    Solid {
-      name "physical gripper mount"
+    TouchSensor {
+      name "tool_force_sensor"
+      type "force-3d"
+      lookupTable [ ]
       children [
+        Display {
+          name "force_scope_display"
+          width 560
+          height 250
+        }
         Robotiq2f140Gripper {}
         Pose {
           translation -0.065 0 0.025
@@ -115,8 +122,15 @@ DEF ARM_2 UR5e {
   supervisor TRUE
   selfCollision FALSE
   toolSlot [
-    DEF CLEANING_HEAD Solid {
+    DEF CLEANING_HEAD TouchSensor {
+      type "force-3d"
+      lookupTable [ ]
       children [
+        Display {
+          name "force_scope_display"
+          width 560
+          height 250
+        }
         Pose {
           translation -0.022 0 0.025
           children [
@@ -204,7 +218,7 @@ DEF ARM_2 UR5e {
           ]
         }
       ]
-      name "long cleaning head"
+      name "tool_force_sensor"
       boundingObject Group {
         children [
           Box { size 0.045 0.045 0.050 }

@@ -12,7 +12,7 @@ CAMERA_WIDTH, CAMERA_HEIGHT = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
 from vision_tracker import AdapterVisionTracker  # noqa: E402
 
 
-def framed_image(left, top, right, bottom):
+def framed_image(left, top, right, bottom, thickness=6):
     """產生橘色中空外框與黃色工具端點的 BGRA 測試影像。"""
     image = bytearray(CAMERA_WIDTH * CAMERA_HEIGHT * 4)
 
@@ -23,15 +23,29 @@ def framed_image(left, top, right, bottom):
                 image[offset:offset + 4] = bytes((blue, green, red, 255))
 
     orange = (20, 105, 190)
-    rectangle(left, top, right, top + 6, *orange)
-    rectangle(left, bottom - 6, right, bottom, *orange)
-    rectangle(left, top, left + 6, bottom, *orange)
-    rectangle(right - 6, top, right, bottom, *orange)
+    rectangle(left, top, right, top + thickness, *orange)
+    rectangle(left, bottom - thickness, right, bottom, *orange)
+    rectangle(left, top, left + thickness, bottom, *orange)
+    rectangle(right - thickness, top, right, bottom, *orange)
     rectangle(151, 191, 170, 207, 30, 190, 230)  # 黃色清潔頭，不應被當成插座。
     return bytes(image)
 
 
 class AdapterVisionTest(unittest.TestCase):
+    def test_rejects_floor_like_frame_outside_socket_region(self):
+        result = locate_adapter(
+            framed_image(24, 168, 91, 231, thickness=12),
+            (0.34, 0.08, 0.30), (1, 0, 0, 0, 1, 0, 0, 0, 1),
+        )
+        self.assertIsNone(result)
+
+    def test_accepts_thicker_simulated_frame_seen_during_socket_check(self):
+        result = locate_adapter(
+            framed_image(118, 20, 197, 91, thickness=9),
+            (0.34, 0.08, 0.30), (1, 0, 0, 0, 1, 0, 0, 0, 1),
+        )
+        self.assertIsNotNone(result)
+
     def test_estimates_socket_center_and_depth_from_orange_frame(self):
         image = framed_image(114, 85, 207, 155)
         result = locate_adapter(image, (0.34, 0.08, 0.30), (1, 0, 0, 0, 1, 0, 0, 0, 1))

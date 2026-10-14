@@ -15,6 +15,7 @@ from plan import (
     PLACE_TIP, PORT, POINTS, RUN_ORDER, CueEvent, joint_trajectory,
 )
 from vision_tracker import AdapterVisionTracker, PortVisionTracker
+from force_scope import ForceScope
 
 
 GRIPPER_MOTORS = (
@@ -91,6 +92,7 @@ class DualArmTask:
             sensor.enable(controls.TIME_STEP_MS)
         for motor in self.motors:
             motor.setVelocity(controls.MAX_JOINT_SPEED)
+        self.force_scope = ForceScope(robot, role, controls.TIME_STEP_MS)
 
         self.gripper = ()
         self.gripper_sensors = ()
@@ -133,6 +135,7 @@ class DualArmTask:
         try:
             while self.robot.step(controls.TIME_STEP_MS) != -1:
                 second = self.robot.getTime()
+                self.force_scope.sample(second)
                 if self.vision is not None:
                     self.vision.sample(second)
                 if self.adapter_vision is not None:

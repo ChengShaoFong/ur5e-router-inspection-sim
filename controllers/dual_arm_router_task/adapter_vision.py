@@ -50,10 +50,15 @@ def _orange_frame(image):
             continue
         center_x = (box[0] + box[2]) / 2
         center_y = (box[1] + box[3]) / 2
+        if (abs(center_x - config.CAMERA_WIDTH / 2) > config.MAX_CENTER_OFFSET[0]
+                or abs(center_y - config.CAMERA_HEIGHT / 2) > config.MAX_CENTER_OFFSET[1]):
+            continue
         interior = sum(
             abs(x - center_x) < width * 0.25 and abs(y - center_y) < height * 0.25
             for x, y in points
         )
+        # The brown rear wall changes with lighting, so first exclude the
+        # off-center floor reflection before allowing this modest fill.
         if interior > len(points) * config.MAX_INTERIOR_RATIO:
             continue
         candidates.append((len(points), box))

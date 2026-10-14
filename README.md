@@ -6,6 +6,14 @@ https://github.com/user-attachments/assets/23b2402d-593f-4822-a061-e1f9c1d7581a
 
 用 Webots 開啟 `worlds/Neura_Dual_Arm_Router_Service.wbt`，按執行即可。任務會由手臂一取起插座、裝入指定插孔，手臂二定位並清潔插座，最後由手臂一拆下。多個點位會依順序執行；中間不會把插座放回地面。
 
+## 力感測示波器
+
+雙臂世界另有兩個力感測示波器，執行後顯示在 Webots 3D 視窗左側。紅／綠／藍分別為工具局部座標的 Fx／Fy／Fz，黃色為合力 `|F|`，單位 N。橫軸是模擬時間（秒），保留最近 10 秒；縱軸自動縮放，並顯示即時值及視窗內合力峰值。每 32 ms 取樣，約每 0.1 秒重畫，保留未平滑的瞬間尖峰。
+
+量測位置為手臂一的夾爪座與手臂二的清潔頭，讀值是原始工具負載，包含重力、運動慣性和接觸反作用，未做重力補償；不是單片夾爪的夾持力。世界檔使用 `force-3d` TouchSensor 與空的 `lookupTable`，直接輸出 N（[Webots 官方說明](https://cyberbotics.com/doc/reference/touchsensor)）。
+
+若波形被關閉，選取對應手臂，在 `Overlays → Display Devices` 勾選 `force_scope_display`，並取消 `Hide All Display Overlays`。可以拖曳面板或雙擊開成獨立視窗。更新世界檔後請重新載入 `worlds/Neura_Dual_Arm_Router_Service.wbt`，讓新增的感測器生效。
+
 ## Manual adjustment `task.ini`
 
 | 區段 | 用途 |

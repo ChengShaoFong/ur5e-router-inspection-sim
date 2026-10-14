@@ -1,0 +1,11 @@
+[router service arm1] gripper command=0.000 rad; actual fingers=(-0.001, -0.001) rad
+[router service arm1]   0.0s: home
+[router service arm1]   2.0s: approach adapter
+[router service arm1]   6.0s: lower fingers around adapter
+[router service arm1] gripper command=0.700 rad; actual fingers=(0.0, 0.0) rad
+[router service arm1]   7.0s: close gripper on adapter
+[router service arm1]  10.0s: hold while fingers close
+[router service arm1] actual fingers=(0.45, 0.438) rad; target=0.700; contact inferred=True
+[router service arm1] fingers settled; adapter moved 0.001 m during closing
+SCOPE_PROBE arm1 values (0.005136414334283108, -0.04719651869414355, 8.116524566877738) peak_N 9.406812785734202
+[router service arm1]  13.0s: lift adapter
